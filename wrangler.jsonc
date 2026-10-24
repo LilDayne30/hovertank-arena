@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hovertank-arena",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  // built client (npm run build) served as static assets; /api/* goes to the Worker first
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "BattleRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["BattleRoom"] }],
+  "rules": [{ "type": "Data", "globs": ["**/*.bin"], "fallthrough": true }],
+  "observability": { "enabled": true }
+}

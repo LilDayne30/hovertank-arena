@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { Client } from '@colyseus/sdk';
+import { Room, createRoom, roomInfo } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
 } from '../shared/sim.js';
@@ -7,7 +7,7 @@ import { PLAYER_COLORS, PLAYER_COLOR_NAMES, RECONNECT_SECONDS } from '../shared/
 import { Input } from './input.js';
 
 // ------------------------------------------------------------------ config
-const ENDPOINT = import.meta.env.DEV ? `${location.protocol}//${location.hostname}:2567` : location.origin;
+const ENDPOINT = location.origin;   // the Worker serves both the page and /api
 const INTERP_TICKS = 3.5;          // remote entities are rendered ~115 ms in the past
 const CAM_DIST = 8.5, CAM_PIVOT = 2.3, CAM_LIFT = 0.9;
 const $ = (id) => document.getElementById(id);
@@ -144,7 +144,7 @@ function wireUi() {
   $('btn-fullscreen').onclick = async () => {
     try { await document.documentElement.requestFullscreen?.(); await screen.orientation?.lock?.('landscape'); } catch { /* not supported (iOS Safari) */ }
   };
-  $('btn-leave').onclick = async () => { if (room) { store.sdel(`ht-token-${room.roomId}`); await room.leave(true).catch(() => {}); } location.href = location.pathname; };
+  $('btn-leave').onclick = async () => { if (room) { store.sdel(`ht-token-${room.roomId}`); await room.leave(); } location.href = location.pathname; };
 }
 
 function showInvite() {
@@ -160,27 +160,29 @@ async function start(mode, rid) {
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
   showLoading(true, 'サーバーに接続中…');
-  const slow = setTimeout(() => showLoading(true, 'サーバーを起動中です（無料サーバーのため最大1分ほどかかります）…'), 3500);
   try {
-    await waitForServer();
-    const client = new Client(ENDPOINT);
-    if (mode === 'create') room = await client.create('battle', { name });
-    else if (mode === 'reconnect') {
-      try { room = await client.reconnect(store.sget(`ht-token-${rid}`)); } catch { store.sdel(`ht-token-${rid}`); room = await client.joinById(rid, { name }); }
-    } else room = await client.joinById(rid, { name });
+    let id = rid;
+    if (mode === 'create') id = await createRoom(ENDPOINT);
+    else {
+      const info = await roomInfo(ENDPOINT, id);
+      if (!info.exists) throw Object.assign(new Error('notfound'), { code: 'notfound' });
+      if (info.full && mode !== 'reconnect') throw Object.assign(new Error('full'), { code: 'full' });
+    }
+    room = new Room(ENDPOINT, id);
+    bindRoom(room);
+    const token = mode === 'reconnect' ? store.sget(`ht-token-${id}`) : null;
+    await room.connect(name, token);   // with a valid token the server gives back the same seat
   } catch (e) {
-    clearTimeout(slow); showLoading(false);
-    const msg = String(e?.message || e);
-    $('lobby-status').textContent = /locked|full/i.test(msg) ? 'この部屋は満室です（最大4人）。'
-      : /not found|invalid|expired/i.test(msg) ? '部屋が見つかりません。試合が終了したか、URLが違う可能性があります。'
-        : `接続できませんでした: ${msg}`;
+    showLoading(false);
+    const code = e?.code || '';
+    $('lobby-status').textContent = code === 'full' ? 'この部屋は満室です（最大4人）。'
+      : code === 'notfound' ? '部屋が見つかりません。URLが違うか、部屋が削除された可能性があります。'
+        : `接続できませんでした: ${e?.message || e}`;
     room = null;
     return;
   }
-  clearTimeout(slow);
   history.replaceState(null, '', `${location.pathname}?r=${room.roomId}${DEBUG ? '&debug' : ''}`);
   store.sset(`ht-token-${room.roomId}`, room.reconnectionToken);
-  bindRoom(room);
   showLoading(false);
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -189,14 +191,6 @@ async function start(mode, rid) {
   if (mode === 'create') showInvite();
   if (!input.touchMode) $('center-msg').textContent = 'クリックで操作開始';
   setInterval(() => room?.send('ping', performance.now()), 2000);
-}
-
-async function waitForServer() {
-  for (let i = 0; i < 40; i++) {
-    try { const r = await fetch(`${ENDPOINT}/healthz`, { cache: 'no-store' }); if (r.ok) return; } catch { /* waking up */ }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  throw new Error('サーバーが応答しません');
 }
 
 function bindRoom(r) {
@@ -212,8 +206,7 @@ function bindRoom(r) {
   r.onMessage('pong', (t) => { ping = ping ? ping * 0.7 + (performance.now() - t) * 0.3 : performance.now() - t; });
   r.onDrop(() => { banner('接続が切れました。再接続中…'); input.reset(); });
   r.onReconnect(() => { banner(''); store.sset(`ht-token-${r.roomId}`, r.reconnectionToken); local.spawnId = -1; });
-  r.onLeave((code) => {
-    if (code === 4000) return;   // consented
+  r.onLeave(() => {
     banner('');
     document.body.classList.remove('playing');
     input.enabled = false;
@@ -338,8 +331,10 @@ function tick() {
   }
   local.pending.push(inp);
   if (local.pending.length > 90) local.pending.shift();
-  room.send('i', [inp]);
+  outBuf.push(inp);
+  if (outBuf.length >= 2) { room.send('i', outBuf); outBuf = []; }
 }
+let outBuf = [];
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
 // aim the barrel at whatever is under the crosshair (with gravity compensation)
