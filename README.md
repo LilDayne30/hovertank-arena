@@ -1,5 +1,7 @@
 # Hover Tank Arena
 
+**公開URL：https://hovertank-arena.danaoki30.workers.dev**
+
 最大4人で遊べる、軽量な3Dホバー戦車のブラウザ対戦ゲームです。三人称視点で、滑る・撃つ・跳ぶ操作の気持ちよさを優先しています。PC（キーボード＋マウス）とスマートフォン（タッチ、横画面）に対応しています。
 
 - クライアント：[PlayCanvas Engine](https://developer.playcanvas.com/user-manual/engine/) 2.23（Editor は不使用、Vite でビルド）
@@ -53,11 +55,23 @@ npx wrangler dev --var MATCH_SECONDS:8        # 試合時間を短くして、�
 
 設定はすべて `wrangler.jsonc` にあります。
 
-**GitHub 連携（推奨）**：Cloudflare ダッシュボードの「Workers & Pages」→「Create」→「Import a repository」でこのリポジトリを選び、ビルドコマンドに `npm run build`、デプロイコマンドに `npx wrangler deploy` を指定します。以降は `main` に push するたびに自動でデプロイされます。
+**GitHub 連携（設定済み）**：Cloudflare の Workers Builds がこのリポジトリにつながっていて、`main` に push すると自動でビルド（`npm run build`）とデプロイ（`npx wrangler deploy`）が行われます。新しく作り直す場合は、Cloudflare ダッシュボードの「Workers & Pages」→「Create application」→「Continue with GitHub」でこのリポジトリを選び、同じコマンドを指定します。
 
 **手元から**：`npx wrangler login` のあと `npm run deploy`。
 
 無料プランの目安（Durable Objects）：リクエストは1日10万件まで。受信する WebSocket メッセージは20件で1件と数えるので、入力を2ティック分まとめて送るこのゲームでは、4人対戦で1日あたり約9時間が目安です。送信メッセージは課金対象外です。上限に達するとその日は部屋に接続できなくなります（課金はされません）。
+
+## 計測結果（2026年10月24日、公開URLで計測）
+
+| 項目 | 結果 | 備考 |
+|---|---|---|
+| 初回の配信容量 | 386 KB | JS 305 KB、戦車 57 KB、ステージ 15 KB、当たり判定 3 KB ほか（すべて圧縮後） |
+| 2回目以降の配信容量 | 約 6 KB | ブラウザのキャッシュが効く |
+| 初回の読み込み時間 | 約 1.1 秒 | テスト用サーバー（クラウド、回線は高速）から計測。スマホ回線では未計測 |
+| サーバーの計算回数 | 毎秒 30.0 回 | 本番の Durable Object で計測 |
+| スナップショットの大きさ | 1人のとき約 125 B／回 | 4人＋砲弾が飛び交うと数百 B〜1 KB 程度 |
+| 往復の遅延（RTT） | 約 32 ms | テスト用サーバーから計測。日本の家庭回線・スマホ回線では未計測 |
+| FPS | 未計測 | テストは画面なしのブラウザ（ソフトウェア描画）で行ったため、実機の性能は測れていない |
 
 ## 構成
 

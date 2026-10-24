@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
 const URL = process.env.URL;
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  for (const profile of [{ name: 'no throttling', net: null }, { name: 'throttled 4G (9 Mbps down, 1.5 Mbps up, 150 ms RTT)', net: { offline: false, downloadThroughput: 9e6 / 8, uploadThroughput: 1.5e6 / 8, latency: 150 } }]) {
+  for (const profile of [{ name: 'this test machine', net: null }]) {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 720 } });
     const p = await ctx.newPage();
     const cdp = await ctx.newCDPSession(p);
@@ -18,8 +18,8 @@ const URL = process.env.URL;
       bytes = 0;
       const t0 = Date.now();
       await p.goto(URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
-      await p.waitForFunction(() => document.getElementById('loading').classList.contains('hidden') && window.__ht, null, { timeout: 120000 });
-      const ms = Date.now() - t0;
+      await p.waitForFunction(() => window.__ht && window.__ht.readyAt, null, { timeout: 120000 });
+      const ms = Math.round(await p.evaluate(() => window.__ht.readyAt));   // ms from navigation start to game ready
       await p.waitForTimeout(500);
       console.log(`[${profile.name}] ${run}: ready in ${ms} ms, transferred ${(bytes / 1024).toFixed(0)} KB`);
       if (run === 'cold' && !profile.net) console.log('  files:', Object.values(per).filter((s) => / KB$/.test(s)).join(' | '));
