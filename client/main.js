@@ -53,6 +53,7 @@ async function init() {
   showLoading(true, '読み込み中…');
   await setupEngine();
   showLoading(false);
+  window.__ht.readyAt = performance.now();
   // auto-rejoin after a reload in the same tab
   if (rid && store.sget(`ht-token-${rid}`)) start('reconnect', rid);
 }
@@ -87,7 +88,7 @@ async function setupEngine() {
   const base = import.meta.env.BASE_URL;
   const [meta, hf] = await Promise.all([
     fetch(`${base}assets/arena_hf.json`).then((r) => r.json()),
-    fetch(`${base}assets/arena_hf.bin`).then((r) => r.arrayBuffer()),
+    fetchBinary(`${base}assets/arena_hf.bin`),
   ]);
   world = makeWorld(meta, new Float32Array(hf));
   const [arena, tank] = await Promise.all([loadContainer(`${base}assets/arena.glb`), loadContainer(`${base}assets/tank.glb`)]);
@@ -111,9 +112,23 @@ async function setupEngine() {
   app.start();
 }
 
-function loadContainer(url) {
+// Binary assets are shipped pre-gzipped (<file>.gz, see vite.config.js) because the CDN does not
+// compress .glb/.bin. Decompress in the browser; fall back to the plain file if needed.
+async function fetchBinary(url) {
+  if (typeof DecompressionStream !== 'undefined') {
+    try {
+      const r = await fetch(`${url}.gz`);
+      if (r.ok) return await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+    } catch { /* fall through */ }
+  }
+  return (await fetch(url)).arrayBuffer();
+}
+
+async function loadContainer(url) {
+  const buf = await fetchBinary(url);
+  const blobUrl = URL.createObjectURL(new Blob([buf], { type: 'model/gltf-binary' }));
   return new Promise((resolve, reject) => {
-    app.assets.loadFromUrl(url, 'container', (err, asset) => (err ? reject(err) : resolve(asset)));
+    app.assets.loadFromUrlAndFilename(blobUrl, url.split('/').pop(), 'container', (err, asset) => (err ? reject(err) : resolve(asset)));
   });
 }
 
