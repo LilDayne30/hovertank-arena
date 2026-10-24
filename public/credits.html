@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Credits – Hover Tank Arena</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; line-height: 1.7; background: #fbf6ee; color: #2b1d12; }
+    @media (prefers-color-scheme: dark) { body { background: #1d140d; color: #f3e7d6; } a { color: #ffc56e; } }
+    h1 { font-size: 24px; } h2 { font-size: 18px; margin-top: 28px; }
+    section { border-top: 1px solid rgba(127,127,127,.35); padding-top: 4px; }
+    ul { padding-left: 1.2em; }
+  </style>
+</head>
+<body>
+  <h1>クレジット・ライセンス / Credits</h1>
+
+  <section>
+    <h2>ステージ：Low Poly Desert Arena</h2>
+    <ul>
+      <li>作者 / Author: <strong>H4kor</strong></li>
+      <li>素材URL: <a href="https://h4kor.itch.io/low-poly-desert-arena">https://h4kor.itch.io/low-poly-desert-arena</a></li>
+      <li>ライセンス: <a href="https://creativecommons.org/licenses/by/4.0/">Creative Commons Attribution 4.0 International (CC BY 4.0)</a></li>
+      <li>変更点 / Changes made:
+        <ul>
+          <li>Blender形式（arena.blend）からGLBに変換</li>
+          <li>全体を3倍に等倍拡大（ゲーム内の大きさに合わせるため）</li>
+          <li>カメラ・ライトを削除、面の法線を再計算、マテリアルを元の単色のまま glTF 用に再構成</li>
+          <li>頂点の量子化（KHR_mesh_quantization）で軽量化</li>
+          <li>形状から当たり判定用の高さマップを生成</li>
+        </ul>
+      </li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>戦車：Tank Pack（Animated Tanks Pack）</h2>
+    <ul>
+      <li>作者 / Author: <strong>Quaternius</strong></li>
+      <li>素材URL: <a href="https://quaternius.com/packs/animatedtanks.html">https://quaternius.com/packs/animatedtanks.html</a></li>
+      <li>ライセンス: <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 Universal</a>（表記義務なし・感謝を込めて記載）</li>
+      <li>使用モデル: Tank3。車体と履帯を1つに、砲塔と砲身を1つに結合し、アニメーション・ボーンを除去。プレイヤーごとに色を変更。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>ソフトウェア</h2>
+    <ul>
+      <li><a href="https://github.com/playcanvas/engine">PlayCanvas Engine</a> – MIT License</li>
+      <li><a href="https://github.com/colyseus/colyseus">Colyseus</a> – MIT License</li>
+      <li><a href="https://github.com/expressjs/express">Express</a> – MIT License</li>
+    </ul>
+  </section>
+  <p><a href="./">← ゲームに戻る</a></p>
+</body>
+</html>

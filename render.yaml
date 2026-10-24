@@ -1,0 +1,14 @@
+# Render Blueprint: one free web service serves the static client and the Colyseus WebSocket server
+services:
+  - type: web
+    name: hovertank-arena
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
