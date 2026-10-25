@@ -1,7 +1,7 @@
 // Authoritative match logic, independent of the network layer.
 // The Cloudflare Durable Object (worker/room.js) owns sockets and calls into this class.
 import {
-  C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt,
+  C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate,
 } from './sim.js';
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS } from './arena.js';
 
@@ -150,6 +150,7 @@ export class Game {
 
     const alive = [...this.players.values()].filter((p) => p.alive && p.connected);
     for (let a = 0; a < alive.length; a++) for (let b = a + 1; b < alive.length; b++) separateTanks(alive[a].tank, alive[b].tank);
+    for (const p of alive) depenetrate(p.tank, w);   // a shove must never leave a tank inside a wall
 
     for (let i = this.shells.length - 1; i >= 0; i--) {
       const s = this.shells[i];

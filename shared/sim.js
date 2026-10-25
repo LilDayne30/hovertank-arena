@@ -69,14 +69,62 @@ export function heightAt(w, x, z) {
   return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz;
 }
 
-// Max terrain height under a disc (used for wall tests).
-const RING = [[1, 0], [0.707, 0.707], [0, 1], [-0.707, 0.707], [-1, 0], [-0.707, -0.707], [0, -1], [0.707, -0.707]];
-function blocked(w, x, z, footY, r) {
-  if (heightAt(w, x, z) - footY > C.stepMax) return true;
-  for (const [dx, dz] of RING) {
-    if (heightAt(w, x + dx * r, z + dz * r) - footY > C.stepMax) return true;
+// ---------------------------------------------------------------- wall collision
+// The tank is a disc of radius C.radius. Terrain more than C.stepMax above the hull bottom is wall.
+// penetration() samples the disc (centre + two rings) and reports how many samples are inside a
+// wall and the average direction towards them, so moves can be judged as "into" or "out of" a wall.
+const DIRS = Array.from({ length: 16 }, (_, i) => [Math.cos((i / 16) * Math.PI * 2), Math.sin((i / 16) * Math.PI * 2)]);
+function penetration(w, x, z, footY) {
+  let n = 0, px = 0, pz = 0;
+  if (heightAt(w, x, z) - footY > C.stepMax) n += 2;
+  for (const f of [1, 0.6]) {
+    const r = C.radius * f;
+    for (const [dx, dz] of DIRS) {
+      if (heightAt(w, x + dx * r, z + dz * r) - footY > C.stepMax) { n++; px += dx; pz += dz; }
+    }
   }
-  return false;
+  return { n, px, pz };
+}
+
+// Try to move by (mx, mz). A move is accepted when it does not end in a wall, or when the tank is
+// already overlapping a wall and the move does not make that worse (so it can always back out).
+function tryMove(t, w, footY, mx, mz) {
+  const cur = penetration(w, t.x, t.z, footY);
+  const nxt = penetration(w, t.x + mx, t.z + mz, footY);
+  const ok = nxt.n === 0 || nxt.n < cur.n || (cur.n > 0 && nxt.n <= cur.n && mx * cur.px + mz * cur.pz <= 0);
+  if (ok) { t.x += mx; t.z += mz; }
+  return ok;
+}
+
+// If the tank overlaps a wall (landing next to one after a jump, being shoved by another tank...),
+// push it out a little every tick and cancel the velocity that points into the wall.
+export function depenetrate(t, w) {
+  const footY = t.y - C.hoverHeight;
+  let p = penetration(w, t.x, t.z, footY);
+  for (let iter = 0; iter < 4 && p.n > 0; iter++) {
+    let dx = -p.px, dz = -p.pz, m = Math.hypot(dx, dz);
+    let best = null;
+    if (m > 1e-6) {
+      dx /= m; dz /= m;
+      for (const step of [0.12, 0.25, 0.4]) {
+        const q = penetration(w, t.x + dx * step, t.z + dz * step, footY);
+        if (q.n < p.n) { best = { x: t.x + dx * step, z: t.z + dz * step, q }; break; }
+      }
+    }
+    if (!best) {
+      // symmetric overlap (e.g. centre inside a thin wall): pick whichever direction helps most
+      for (const [ex, ez] of DIRS) {
+        for (const step of [0.25, 0.5]) {
+          const q = penetration(w, t.x + ex * step, t.z + ez * step, footY);
+          if (q.n < p.n && (!best || q.n < best.q.n)) best = { x: t.x + ex * step, z: t.z + ez * step, q };
+        }
+      }
+    }
+    if (!best) break;
+    t.x = best.x; t.z = best.z;
+    if (m > 1e-6) { const into = t.vx * -dx + t.vz * -dz; if (into > 0) { t.vx += dx * into; t.vz += dz * into; } }
+    p = best.q;
+  }
 }
 
 // ---------------------------------------------------------------- tanks
@@ -190,9 +238,9 @@ export function stepTank(t, inp, w, dt = DT) {
 
   // horizontal move with wall sliding (axis separated)
   const footY = t.y - C.hoverHeight;
-  const nx = t.x + t.vx * dt, nz = t.z + t.vz * dt;
-  if (!blocked(w, nx, t.z, footY, C.radius)) t.x = nx; else t.vx *= -0.2;
-  if (!blocked(w, t.x, nz, footY, C.radius)) t.z = nz; else t.vz *= -0.2;
+  if (!tryMove(t, w, footY, t.vx * dt, 0)) t.vx *= -0.2;
+  if (!tryMove(t, w, footY, 0, t.vz * dt)) t.vz *= -0.2;
+  depenetrate(t, w);
 
   // vertical
   const ground = heightAt(w, t.x, t.z) + C.hoverHeight;
