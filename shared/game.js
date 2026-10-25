@@ -139,7 +139,12 @@ export class Game {
         p.lastSeq = inp.seq;
         if (this.phase !== 'play') inp = { ...inp, f: false };
         const ev = stepTank(p.tank, inp, w);
-        if (ev.fired) this.shells.push({ id: this.shellId++, owner: p.id, seq: p.tank.shotSeq, ...muzzle(p.tank), life: C.shellLife });
+        if (ev.fired) {
+          this.shells.push({ id: this.shellId++, owner: p.id, seq: p.tank.shotSeq, ...muzzle(p.tank), life: C.shellLife });
+          // spawn protection is for getting your bearings, not for attacking: shooting ends it
+          if (this.time < p.invulnUntil) { p.invulnUntil = this.time; events.push({ t: 'unshield', v: p.id }); }
+        }
+        if (ev.boost) events.push({ t: 'boost', v: p.id, l: ev.boost });
       }
     }
 
@@ -199,10 +204,12 @@ export class Game {
     const P = [];
     for (const p of this.players.values()) {
       const t = p.tank;
-      const flags = (p.alive ? 1 : 0) | (t.grounded ? 2 : 0) | (this.time < p.invulnUntil ? 4 : 0) | (p.connected ? 8 : 0);
+      const flags = (p.alive ? 1 : 0) | (t.grounded ? 2 : 0) | (this.time < p.invulnUntil ? 4 : 0) | (p.connected ? 8 : 0) | (t.drifting ? 16 : 0);
       P.push([p.id, r3(t.x), r3(t.y), r3(t.z), r3(t.vx), r3(t.vy), r3(t.vz), r3(t.yaw), r3(t.aimYaw), r3(t.aimPitch),
         p.hp, flags, p.lastSeq, r3(t.cooldown), t.shotSeq, p.kills, p.deaths, p.spawnId,
-        p.alive ? 0 : Math.max(0, Math.round((p.respawnAt - this.time) * 10) / 10)]);
+        p.alive ? 0 : Math.max(0, Math.round((p.respawnAt - this.time) * 10) / 10),
+        r3(t.charge), r3(t.boost), t.boostLvl,
+        this.time < p.invulnUntil ? Math.round((p.invulnUntil - this.time) * 10) / 10 : 0]);
     }
     const B = this.shells.map((s) => [s.id, s.owner, s.seq, r2(s.x), r2(s.y), r2(s.z), r2(s.vx), r2(s.vy), r2(s.vz)]);
     this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Math.max(0, Math.round(this.phaseEnds - this.time)), p: P, b: B, e: events });

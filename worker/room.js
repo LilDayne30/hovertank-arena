@@ -2,13 +2,14 @@
 // 30 Hz game loop; all game rules live in shared/game.js.
 import { DurableObject } from 'cloudflare:workers';
 import { makeWorld } from '../shared/sim.js';
-import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS } from '../shared/arena.js';
+import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles } from '../shared/arena.js';
 import { Game } from '../shared/game.js';
 import meta from '../public/assets/arena_hf.json';
 import heights from '../public/assets/arena_hf.bin';
 
 const world = makeWorld(meta, new Float32Array(heights));
 world.spawns = SPAWNS;
+applyObstacles(world);   // cover objects are part of the collision heightfield
 const CLEANUP_MS = 30 * 60 * 1000;   // forget an empty room after 30 min
 
 const rand = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(36).padStart(2, '0')).join('').slice(0, n * 2);

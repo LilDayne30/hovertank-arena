@@ -26,6 +26,10 @@
 
 照準は画面中央の十字に合わせるだけで、砲弾の落下も自動で補正して砲身の角度が決まります。
 
+- **ドリフト・ターボ**：ドリフトを押したまま横滑りするとゲージが溜まり、離すと車体の向きへ加速します（約0.55秒で青＝最高時速23m/s、約1.3秒でオレンジ＝27m/s。通常は17m/s）。横向きの勢いも前に向け直されるので、曲がり角での方向転換や、撃たれたときの回避に使えます。ゲージは照準の下に出ます。
+- **遮蔽物**：中央の高台（4方向のスロープで登れる）、各エリアのL字の壁、柱、ジャンプで越えられる低い壁、木箱。砲弾も遮るので、隠れながら撃ち合えます。名前表示も遮蔽物の向こうでは消えます。
+- **リスポーン直後の無敵**：2秒間シールドが付きますが、**自分が撃つとその場で解除**されます（無敵のまま一方的に攻撃できないようにするため）。
+
 ## ローカルでの起動
 
 Node.js 20 以上が必要です（22 で確認）。
@@ -42,7 +46,8 @@ npm run dev        # ビルドしてから wrangler dev を起動 → http://loc
 
 ```bash
 npm run dev                                   # 別ターミナルで起動しておく
-npm run test:bots                             # 4つのWebSocketクライアントで同期・命中・満室・存在しない部屋・再接続を確認
+npm run test:bots                             # 4つのWebSocketクライアントで同期・命中・満室・存在しない部屋・再接続・無敵解除を確認
+node test/sim-drift.mjs                       # ドリフト・ターボの溜まり方と加速を確認（サーバー不要）
 npm i --no-save playwright && npx playwright install chromium   # 初回のみ
 npm run test:browser                          # 4つの独立したブラウザで招待URL参加・同期・満室・切断・再読み込み復帰
 URL=https://<公開URL> npm run test:browser    # 公開環境に対して実行
@@ -76,9 +81,9 @@ npx wrangler dev --var MATCH_SECONDS:8        # 試合時間を短くして、�
 ## 構成
 
 ```
-client/   画面（PlayCanvas）。main.js＝描画・予測・補間・HUD、input.js＝キーボード／マウス／タッチ、net.js＝通信
+client/   画面（PlayCanvas）。main.js＝描画・予測・補間・HUD、input.js＝キーボード／マウス／タッチ、net.js＝通信、fx.js＝エフェクト、stage.js＝遮蔽物の見た目
 worker/   Cloudflare Worker（index.js＝静的ファイル配信と部屋の振り分け）と Durable Object（room.js＝接続・席・30Hzループ）
-shared/   クライアントとサーバーで共通のコード。sim.js＝移動・砲弾、game.js＝試合ルール、arena.js＝ステージ設定
+shared/   クライアントとサーバーで共通のコード。sim.js＝移動・砲弾・ドリフト、game.js＝試合ルール、arena.js＝スポーン位置と遮蔽物の配置
 public/   配信する素材（GLB、当たり判定用の高さマップ）とクレジットページ
 tools/    元の .blend から素材を作り直すスクリプト（Blender の Python モジュール bpy を使用）
 test/     自動テスト
@@ -107,7 +112,7 @@ tools/build_assets.sh <arena.blend> <Tank3.blend>
 ゲーム内の「クレジット・ライセンス」（`/credits.html`）にも掲載しています。
 
 - ステージ：**Low Poly Desert Arena** by **H4kor** — https://h4kor.itch.io/low-poly-desert-arena — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-  - 変更点：.blend から GLB に変換、3倍に拡大、カメラとライトを削除、法線を再計算、マテリアルを元の単色のまま glTF 用に再構成、頂点を量子化、当たり判定用の高さマップを生成
+  - 変更点：.blend から GLB に変換、3倍に拡大、カメラとライトを削除、法線を再計算、マテリアルを元の単色のまま glTF 用に再構成、頂点を量子化、当たり判定用の高さマップを生成、遮蔽物（台・スロープ・壁・柱・木箱）を追加
 - 戦車：**Tank Pack（Animated Tanks Pack）** by **Quaternius** — https://quaternius.com/packs/animatedtanks.html — [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
   - Tank3 を使用。車体と履帯、砲塔と砲身をそれぞれ結合し、アニメーションを除去、プレイヤーごとに色を変更
 - PlayCanvas Engine：MIT License
@@ -116,10 +121,10 @@ tools/build_assets.sh <arena.blend> <Tank3.blend>
 
 ## 既知の制約
 
-- ステージは平らな約60m四方の囲まれた闘技場で、遮蔽物がほぼありません（元の素材の形のまま。障害物の追加はしていません）。
 - ラグ補償（撃った時点の相手の位置で当たりを判定し直す処理）はありません。通信の遅れが大きいと、動いている相手に当てにくくなります。
 - 照準の上下は砲身の角度として計算されますが、見た目では砲身が上下しません（砲塔が左右に回るだけ）。
 - 戦車同士の押し合いはサーバー側だけで処理するため、ぶつかったとき自分の戦車が少し補正されることがあります。
 - 通信量は1人あたり受信で毎秒十数KB程度です（スナップショットをJSONで毎秒30回送るため）。
+- エフェクトは画質「低・中・高」で量が変わります（低：最大70個、中：150個、高：230個の粒）。実機での負荷は未計測です。
 - iOS Safari は全画面表示と画面の向きの固定に対応していないため、縦向きのときは「横向きにしてください」と表示します。
 - 部屋の状態はメモリ上にあるため、Cloudflare 側で Durable Object が再起動されると、その部屋の試合はリセットされます。

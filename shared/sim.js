@@ -34,6 +34,15 @@ export const C = {
   spawnInvuln: 2,
   aimPitchMin: -0.30,
   aimPitchMax: 0.45,
+  // drift mini-turbo: slide with DRIFT held to charge, release to boost
+  driftMinSpeed: 7,      // must be moving at least this fast...
+  driftMinSlide: 2.2,    // ...and sliding sideways at least this fast to charge
+  charge1: 0.55,         // seconds of sliding for a level-1 boost
+  charge2: 1.3,          // seconds of sliding for a level-2 boost
+  boostTime: [0, 0.6, 1.0],
+  boostKick: [0, 6, 9.5],      // instant speed added along the hull on release (m/s)
+  boostSpeed: [0, 23, 27],     // speed cap while boosting
+  boostAccel: 22,              // extra thrust while boosting
 };
 
 // ---------------------------------------------------------------- world (heightfield)
@@ -63,6 +72,7 @@ export function heightAt(w, x, z) {
 // Max terrain height under a disc (used for wall tests).
 const RING = [[1, 0], [0.707, 0.707], [0, 1], [-0.707, 0.707], [-1, 0], [-0.707, -0.707], [0, -1], [0.707, -0.707]];
 function blocked(w, x, z, footY, r) {
+  if (heightAt(w, x, z) - footY > C.stepMax) return true;
   for (const [dx, dz] of RING) {
     if (heightAt(w, x + dx * r, z + dz * r) - footY > C.stepMax) return true;
   }
@@ -79,6 +89,10 @@ export function newTank(x, z, yaw, groundY) {
     grounded: true,
     cooldown: 0,
     shotSeq: 0,
+    charge: 0,           // drift charge (s)
+    boost: 0,            // remaining boost time (s)
+    boostLvl: 0,
+    drifting: false,     // DRIFT was held last tick (release detection)
   };
 }
 
@@ -101,7 +115,7 @@ export function cleanInput(i) {
 
 // Advance one tank by one tick. Returns {fired:boolean, jumped:boolean, landed:boolean}.
 export function stepTank(t, inp, w, dt = DT) {
-  const ev = { fired: false, jumped: false, landed: false };
+  const ev = { fired: false, jumped: false, landed: false, boost: 0, sliding: false };
   t.aimYaw = inp.ay; t.aimPitch = inp.ap;
 
   const mag = Math.hypot(inp.mx, inp.mz);
@@ -138,8 +152,38 @@ export function stepTank(t, inp, w, dt = DT) {
   }
   t.vx = fwdX * vf + rightX * vl;
   t.vz = fwdZ * vf + rightZ * vl;
+
+  // drift mini-turbo: charge while actually sliding, fire the boost when DRIFT is released
+  const speed = Math.hypot(t.vx, t.vz);
+  ev.sliding = inp.d && t.grounded && speed > C.driftMinSpeed && Math.abs(vl) > C.driftMinSlide;
+  if (ev.sliding) t.charge = Math.min(C.charge2 + 0.2, t.charge + dt);
+  if (!inp.d && t.drifting) {
+    const lvl = t.charge >= C.charge2 ? 2 : t.charge >= C.charge1 ? 1 : 0;
+    if (lvl) {
+      t.boostLvl = lvl; t.boost = C.boostTime[lvl]; ev.boost = lvl;
+      // the kick goes where the hull points, so drift-turning lets you redirect your momentum
+      // most of the sideways momentum is redirected forward as well
+      const keep = Math.max(t.vx * fwdX + t.vz * fwdZ, speed * 0.85);
+      t.vx = fwdX * (keep + C.boostKick[lvl]) + rightX * vl * 0.15;
+      t.vz = fwdZ * (keep + C.boostKick[lvl]) + rightZ * vl * 0.15;
+    }
+    t.charge = 0;
+  }
+  if (!inp.d && !t.drifting) t.charge = 0;
+  t.drifting = inp.d;
+  let cap = C.maxSpeed;
+  if (t.boost > 0) {
+    t.boost = Math.max(0, t.boost - dt);
+    cap = C.boostSpeed[t.boostLvl];
+    t.vx += fwdX * C.boostAccel * dt; t.vz += fwdZ * C.boostAccel * dt;
+    if (t.boost === 0) t.boostLvl = 0;
+  }
   const hs = Math.hypot(t.vx, t.vz);
-  if (hs > C.maxSpeed) { t.vx *= C.maxSpeed / hs; t.vz *= C.maxSpeed / hs; }
+  if (hs > cap) {
+    // above the cap (e.g. just after a boost ends): bleed speed off smoothly instead of clamping
+    const target = Math.max(cap, hs * Math.exp(-2.5 * dt));
+    t.vx *= target / hs; t.vz *= target / hs;
+  }
 
   // jump
   if (inp.j && t.grounded) { t.vy = C.jumpVel; t.grounded = false; ev.jumped = true; }
@@ -187,8 +231,8 @@ export function stepShell(s, w, dt = DT) {
   s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
   s.life -= dt;
   // sample terrain along the segment (shell moves ~2m per tick)
-  for (let k = 1; k <= 3; k++) {
-    const f = k / 3;
+  for (let k = 1; k <= 4; k++) {
+    const f = k / 4;
     const x = s.px + (s.x - s.px) * f, y = s.py + (s.y - s.py) * f, z = s.pz + (s.z - s.pz) * f;
     if (y <= heightAt(w, x, z)) { s.x = x; s.y = y; s.z = z; return { hitGround: true }; }
   }

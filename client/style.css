@@ -88,3 +88,14 @@ body.touch #hpwrap { bottom: auto; top: 40px; width: min(220px, 30vw); }
 
 #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #2b1d12; align-items: center; justify-content: center; font-size: 20px; text-align: center; padding: 24px; }
 @media (orientation: portrait) and (pointer: coarse) { body.playing #rotate { display: flex; } }
+
+/* drift charge gauge */
+#drift { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); width: 120px; height: 9px; background: rgba(0,0,0,.45); border-radius: 5px; overflow: hidden; opacity: 0; transition: opacity .15s; }
+#drift.show { opacity: 1; }
+#drift-fill { height: 100%; width: 0; background: #e8e8e8; }
+#drift[data-lvl="1"] #drift-fill { background: #4cb4ff; box-shadow: 0 0 8px #4cb4ff; }
+#drift[data-lvl="2"] #drift-fill { background: #ff8a2a; box-shadow: 0 0 10px #ff8a2a; }
+#drift span { position: absolute; inset: 0; font-size: 7px; line-height: 9px; text-align: center; letter-spacing: .2em; color: rgba(255,255,255,.85); }
+#shield-msg { position: absolute; left: 50%; top: calc(50% + 50px); transform: translateX(-50%); font-size: 13px; color: #9fe4ff; }
+#center-msg.pop { animation: pop .5s ease-out; color: #ffcf6b; font-size: 40px; }
+@keyframes pop { 0% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; } 40% { opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1); } }
