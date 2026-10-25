@@ -3,7 +3,7 @@ import { Room, createRoom, roomInfo } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
 } from '../shared/sim.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -41,6 +41,7 @@ const seenShells = new Set();     // remote shell ids that already got a muzzle 
 let ping = 0, fpsSmooth = 60;
 const stats = { corrections: 0, bigCorrections: 0 };
 const mats = {};
+const heal = { active: false, next: 0, e: null, tag: null };
 window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
 
 // ------------------------------------------------------------------ boot
@@ -102,6 +103,7 @@ async function setupEngine() {
   root.addChild(arena.resource.instantiateRenderEntity());
   buildStage(app, root, cover);
   makeMaterials();
+  makeHealPickup();
 
   input = new Input(canvas, {
     touchLayer: $('touch-layer'), stickBase: $('stick-base'), stickKnob: $('stick-knob'),
@@ -165,6 +167,15 @@ function wireUi() {
   $('btn-fullscreen').onclick = async () => {
     try { await document.documentElement.requestFullscreen?.(); await screen.orientation?.lock?.('landscape'); } catch { /* not supported (iOS Safari) */ }
   };
+  // new game: tap twice (the first tap asks for confirmation)
+  let armed = 0;
+  const newGame = (btn) => () => {
+    if (!room) return;
+    if (performance.now() - armed > 3000) { armed = performance.now(); btn.textContent = 'もう一度押すとリセット'; setTimeout(() => { btn.textContent = btn.dataset.label; }, 3000); return; }
+    armed = 0; btn.textContent = btn.dataset.label;
+    room.send('newgame', 1);
+  };
+  for (const id of ['btn-newgame', 'btn-result-newgame']) { const b = $(id); b.dataset.label = b.textContent; b.onclick = newGame(b); }
   $('btn-leave').onclick = async () => { if (room) { store.sdel(`ht-token-${room.roomId}`); await room.leave(); } location.href = location.pathname; };
 }
 
@@ -251,7 +262,7 @@ function parseSnap(m) {
     });
   }
   const shells = m.b.map((b) => ({ id: b[0], owner: b[1], seq: b[2], x: b[3], y: b[4], z: b[5], vx: b[6], vy: b[7], vz: b[8] }));
-  return { k: m.k, ph: m.ph, tl: m.tl, players, shells };
+  return { k: m.k, ph: m.ph, tl: m.tl, players, shells, hl: !!m.hl, hn: m.hn || 0 };
 }
 
 function onSnapshot(m) {
@@ -263,10 +274,20 @@ function onSnapshot(m) {
   for (const e of m.e) {
     if (e.t === 'hit' && e.o === myId) flashHitmark();
     if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); }
+    if (e.t === 'newgame') {
+      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました`);
+      $('result').classList.add('hidden'); $('settings').classList.add('hidden');
+      local.spawnId = -1;
+    }
+    if (e.t === 'healspawn') notice('中央の丘に回復アイテムが出現！');
+    if (e.t === 'heal' && e.v === myId) { centerFlash('全回復！', 1000, true); flashHeal(); }
     pendingEvents.push({ k: s.k, e });
   }
   if (phase !== s.ph) { phase = s.ph; if (phase === 'play') $('result').classList.add('hidden'); }
   $('timer').textContent = `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
+  heal.active = s.hl; heal.next = s.hn;
+  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? '✚ 回復アイテム 出現中（中央の丘）' : `✚ 回復まで ${s.hn}秒`;
+  $('heal-ind').classList.toggle('on', s.hl);
   updateBoardScores(s);
 
   const me = s.players.get(myId);
@@ -330,6 +351,7 @@ function update(dt) {
   renderLocal(alpha, dt);
   if (rt !== null) { renderRemote(rt, dt); flushEvents(rt); }
   tankFx(dt);
+  updateHealPickup(dt);
   updateCamera(dt);
   computeAimPoint();
   updateLocalShells(dt);
@@ -404,6 +426,57 @@ function makeMaterials() {
     m.blendType = pc.BLEND_ADDITIVE; m.depthWrite = false; m.update(); return m;
   });
   mats.slotLit = PLAYER_COLORS.map((c) => { const m = new pc.StandardMaterial(); m.diffuse = new pc.Color(...c); m.update(); return m; });
+}
+
+// ------------------------------------------------------------------ heal pickup
+function makeHealPickup() {
+  const g = new pc.Entity('heal');
+  const cross = new pc.Entity('cross');
+  const glowMat = fx.m.green;
+  for (const [sx, sy] of [[1.6, 0.5], [0.5, 1.6]]) {
+    const b = new pc.Entity('bar');
+    b.addComponent('render', { type: 'box', material: glowMat, castShadows: false });
+    b.setLocalScale(sx, sy, 0.5);
+    cross.addChild(b);
+  }
+  const halo = new pc.Entity('halo');
+  halo.addComponent('render', { type: 'sphere', material: fx.m.greenGlow, castShadows: false });
+  halo.setLocalScale(2.6, 2.6, 2.6);
+  cross.addChild(halo);
+  g.addChild(cross);
+  const ring = new pc.Entity('ring');
+  ring.addComponent('render', { type: 'torus', material: fx.m.greenGlow, castShadows: false });
+  ring.setLocalPosition(0, -1.25, 0);
+  g.addChild(ring);
+  const beam = new pc.Entity('beam');
+  beam.addComponent('render', { type: 'cylinder', material: fx.m.greenGlow, castShadows: false });
+  beam.setLocalScale(0.35, 30, 0.35);
+  beam.setLocalPosition(0, 15, 0);
+  g.addChild(beam);
+  g.setPosition(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
+  g.enabled = false;
+  root.addChild(g);
+  heal.e = g; heal.cross = cross; heal.ring = ring;
+  const tag = document.createElement('div');
+  tag.className = 'tag heal-tag';
+  tag.textContent = '✚ 回復';
+  $('tags').appendChild(tag);
+  heal.tag = tag;
+}
+function updateHealPickup() {
+  const on = heal.active && phase === 'play';
+  heal.e.enabled = on;
+  heal.tag.style.display = 'none';
+  if (!on) return;
+  const t = performance.now() / 1000;
+  heal.cross.setLocalPosition(0, Math.sin(t * 2.2) * 0.25, 0);
+  heal.cross.setLocalEulerAngles(0, (t * 90) % 360, 0);
+  const s = 4 + Math.sin(t * 3) * 0.4;
+  heal.ring.setLocalScale(s, 0.15, s);
+  // screen label so players can find it from anywhere
+  const p = new pc.Vec3(), w = app.graphicsDevice.clientRect?.width || innerWidth, h = app.graphicsDevice.clientRect?.height || innerHeight;
+  camera.camera.worldToScreen(new pc.Vec3(HEAL_POS.x, HEAL_POS.y + 3.4, HEAL_POS.z), p);
+  if (p.z > 0 && p.x > 0 && p.y > 0 && p.x < w && p.y < h) { heal.tag.style.display = 'block'; heal.tag.style.left = `${p.x}px`; heal.tag.style.top = `${p.y}px`; }
 }
 
 // ------------------------------------------------------------------ tanks
@@ -590,7 +663,12 @@ function flushEvents(rt) {
       const v = tanks.get(e.v); if (v) v.flash = 1;
       if (e.o === myId) killLocalShell(e.q, false);
     } else if (e.t === 'shield') { fx.shieldSpark(e.x, e.y, e.z); if (e.o === myId) killLocalShell(e.q, false); }
-    else if (e.t === 'boost') {
+    else if (e.t === 'healspawn') fx.healSpawn(HEAL_POS.x, HEAL_POS.y, HEAL_POS.z);
+    else if (e.t === 'heal') {
+      fx.healBurst(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
+      const v = tanks.get(e.v); if (v) v.healFlash = 1;
+      if (e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が回復した`);
+    } else if (e.t === 'boost') {
       if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); }
     } else if (e.t === 'kill') {
       const slot = roster.get(e.v)?.slot ?? 0;
@@ -608,9 +686,11 @@ function tankFx(dt) {
   smokeClock += dt;
   for (const [id, v] of tanks) {
     v.recoil = Math.max(0, v.recoil - dt * 6);
-    if (v.flash > 0) {
+    if (v.flash > 0 || v.healFlash > 0) {
       v.flash = Math.max(0, v.flash - dt * 6);
-      for (const m of v.mats) { m.emissive = new pc.Color(v.flash, v.flash * 0.45, v.flash * 0.25); m.update(); }
+      v.healFlash = Math.max(0, (v.healFlash || 0) - dt * 2);
+      const f = v.flash, g = v.healFlash * 0.7;
+      for (const m of v.mats) { m.emissive = new pc.Color(f + g * 0.3, f * 0.45 + g, f * 0.25 + g * 0.35); m.update(); }
     }
     if (!v.visible) continue;
     const gy = heightAt(world, v.pos.x, v.pos.z);
@@ -775,6 +855,9 @@ function centerFlash(text, ms, big) {
   el.classList.remove('pop'); void el.offsetWidth; if (big) el.classList.add('pop');
 }
 function flashHitmark() { const h = $('hitmark'); h.classList.add('on'); setTimeout(() => h.classList.remove('on'), 60); }
+function flashHeal() { const h = $('hpwrap'); h.classList.add('healed'); setTimeout(() => h.classList.remove('healed'), 700); }
+let noticeTimer = 0;
+function notice(html) { const n = $('notice'); n.innerHTML = html; n.classList.add('on'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => n.classList.remove('on'), 2600); }
 function flashDamage() { const h = $('damage'); h.classList.add('on'); setTimeout(() => h.classList.remove('on'), 80); }
 function showResult(list) {
   const ol = $('result-list');

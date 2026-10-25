@@ -3,7 +3,7 @@
 import {
   C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate,
 } from './sim.js';
-import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS } from './arena.js';
+import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS } from './arena.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -32,6 +32,9 @@ export class Game {
     this.phase = 'play';
     this.phaseEnds = this.matchSeconds;
     this.acc = 0;
+    this.healInterval = opts.healInterval || HEAL_INTERVAL;
+    this.heal = { active: false, nextAt: this.healInterval };
+    this.queuedEvents = [];      // events raised outside step() (e.g. new game), sent with the next snapshot
   }
 
   get size() { return this.players.size; }
@@ -95,7 +98,18 @@ export class Game {
     this.phase = 'play';
     this.phaseEnds = this.time + this.matchSeconds;
     this.shells.length = 0;
+    this.heal = { active: false, nextAt: this.time + this.healInterval };
     for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; this.spawn(p); }
+  }
+
+  // any player can start a new game: scores, timer and positions reset for everyone
+  onNewGame(id) {
+    const p = this.players.get(id);
+    if (!p || this.time - (this.lastNewGame ?? -99) < 3) return;   // ignore double taps
+    this.lastNewGame = this.time;
+    this.resetMatch();
+    this.queuedEvents.push({ t: 'newgame', by: id });
+    this.sendRoster();
   }
 
   // advance real time (seconds); runs whole fixed ticks
@@ -109,7 +123,8 @@ export class Game {
     const w = this.world;
     this.tick++;
     this.time += DT;
-    const events = [];
+    const events = this.queuedEvents;
+    this.queuedEvents = [];
 
     if (this.time >= this.phaseEnds) {
       if (this.phase === 'play') {
@@ -151,6 +166,22 @@ export class Game {
     const alive = [...this.players.values()].filter((p) => p.alive && p.connected);
     for (let a = 0; a < alive.length; a++) for (let b = a + 1; b < alive.length; b++) separateTanks(alive[a].tank, alive[b].tank);
     for (const p of alive) depenetrate(p.tank, w);   // a shove must never leave a tank inside a wall
+
+    // heal pickup on the hill top
+    if (this.phase === 'play') {
+      if (!this.heal.active && this.time >= this.heal.nextAt) { this.heal.active = true; events.push({ t: 'healspawn' }); }
+      if (this.heal.active) {
+        for (const p of alive) {
+          const t = p.tank;
+          if (p.hp >= C.maxHp) continue;           // full HP tanks leave it for someone who needs it
+          if (Math.hypot(t.x - HEAL_POS.x, t.z - HEAL_POS.z) > HEAL_RADIUS || Math.abs(t.y - C.hoverHeight - HEAL_POS.y) > 2.5) continue;
+          p.hp = C.maxHp;
+          this.heal = { active: false, nextAt: this.time + this.healInterval };
+          events.push({ t: 'heal', v: p.id });
+          break;
+        }
+      }
+    }
 
     for (let i = this.shells.length - 1; i >= 0; i--) {
       const s = this.shells[i];
@@ -213,7 +244,8 @@ export class Game {
         this.time < p.invulnUntil ? Math.round((p.invulnUntil - this.time) * 10) / 10 : 0]);
     }
     const B = this.shells.map((s) => [s.id, s.owner, s.seq, r2(s.x), r2(s.y), r2(s.z), r2(s.vx), r2(s.vy), r2(s.vz)]);
-    this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Math.max(0, Math.round(this.phaseEnds - this.time)), p: P, b: B, e: events });
+    this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Math.max(0, Math.round(this.phaseEnds - this.time)), p: P, b: B, e: events,
+      hl: this.heal.active ? 1 : 0, hn: this.heal.active ? 0 : Math.max(0, Math.ceil(this.heal.nextAt - this.time)) });
   }
 
   scoreboard() {

@@ -27,7 +27,7 @@ export class BattleRoom extends DurableObject {
     this.game = new Game(world, {
       send: (id, type, data) => this.sendTo(id, type, data),
       broadcast: (type, data) => this.broadcast(type, data),
-    }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined });
+    }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined });
   }
 
   async fetch(request) {
@@ -97,6 +97,7 @@ export class BattleRoom extends DurableObject {
       if (type === 'i') this.game.onInput(id, data);
       else if (type === 'ping') ws.send(JSON.stringify(['pong', data]));
       else if (type === 'name') this.game.onName(id, data);
+      else if (type === 'newgame') this.game.onNewGame(id);
       else if (type === 'leave') this.drop(id, ws, true);
     });
     const onGone = () => this.drop(id, ws, false);

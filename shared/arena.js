@@ -91,6 +91,11 @@ export const PLAYER_COLORS = [
 export const PLAYER_COLOR_NAMES = ['赤', '青', '黄', '緑'];
 
 export const MATCH_SECONDS = 300;
+// heal pickup on top of the central hill: appears every HEAL_INTERVAL s (counted from match start
+// and from the moment the previous one was taken), restores full HP
+export const HEAL_INTERVAL = 40;
+export const HEAL_RADIUS = 3.0;          // horizontal pick-up radius (m)
+export const HEAL_POS = { x: 0, y: 2.6, z: 0 };   // ground height of the hill top
 export const RESULT_SECONDS = 10;
 export const RECONNECT_SECONDS = 20;
 export const MAX_PLAYERS = 4;

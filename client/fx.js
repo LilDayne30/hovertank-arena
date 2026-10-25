@@ -42,6 +42,7 @@ export class Fx {
       ring: glow(1, 0.8, 0.5, 0.7), dustRing: flat(0.78, 0.64, 0.46),
       smoke: flat(0.30, 0.27, 0.24), smokeLight: flat(0.62, 0.57, 0.50), dust: flat(0.80, 0.66, 0.48),
       debris: lit(0.12, 0.11, 0.1), shell: glow(1, 0.85, 0.45), shellCore: glow(1, 1, 0.9),
+      green: flat(0.35, 1, 0.45), greenGlow: glow(0.3, 1, 0.45, 0.6), white2: flat(0.9, 1, 0.92),
     };
   }
 
@@ -248,6 +249,22 @@ export class Fx {
   damageSmoke(x, y, z, heavy) {
     this.add({ mat: heavy ? this.m.smoke : this.m.smokeLight, x: x + rnd(-0.4, 0.4), y: y + 1.9, z: z + rnd(-0.4, 0.4), vy: rnd(2, 3.5), drag: 0.8, life: rnd(0.9, 1.4), s0: 0, s1: heavy ? rnd(1.2, 1.8) : rnd(0.7, 1.1), curve: 'puff' });
     if (heavy && Math.random() < 0.3) this.add({ mat: this.m.orange, x, y: y + 1.7, z, vy: 2, life: 0.25, s0: 0.6, s1: 0 });
+  }
+
+  healBurst(x, y, z) {
+    const m = this.m;
+    this.add({ mat: m.white2, x, y, z, life: 0.15, s0: 1.5, s1: 3.5, curve: 'pop' });
+    this.add({ shape: 'torus', mat: m.greenGlow, x, y: y - 1, z, life: 0.6, s0: 1, s1: 9, sy: 0.08, curve: 'pop' });
+    this.add({ shape: 'cylinder', mat: m.greenGlow, x, y: y + 6, z, life: 0.7, s0: 2.2, s1: 0, sy: 7 });
+    for (let i = 0; i < this.n(18); i++) {
+      const a = rnd(0, 6.283), sp = rnd(3, 9);
+      this.add({ shape: 'box', mat: i % 2 ? m.green : m.white2, x, y, z, vx: Math.cos(a) * sp, vy: rnd(4, 12), vz: Math.sin(a) * sp, g: 9, drag: 1.2, life: rnd(0.6, 1.1), s0: 0.3, s1: 0.05, spin: 8 });
+    }
+  }
+
+  healSpawn(x, y, z) {
+    this.add({ shape: 'cylinder', mat: this.m.greenGlow, x, y: y + 15, z, life: 1.0, s0: 1.6, s1: 0, sy: 20 });
+    this.add({ shape: 'torus', mat: this.m.greenGlow, x, y: y + 0.2, z, life: 0.8, s0: 10, s1: 2, sy: 0.08 });
   }
 
   respawnBeam(x, y, z, colorMat) {
