@@ -10,8 +10,14 @@ const { chromium } = require('playwright');
   const inv = await A.inputValue('#invite-url');
   const B = await mk(); await B.goto(inv, { waitUntil: 'domcontentloaded' }); await B.waitForFunction(() => document.getElementById('loading').classList.contains('hidden')); await B.click('#btn-join');
   await A.waitForTimeout(2500);
-  // step out from behind the centre mesa
-  await B.keyboard.down('KeyA'); await A.keyboard.down('KeyD'); await B.waitForTimeout(1300); await B.keyboard.up('KeyA'); await A.keyboard.up('KeyD'); await A.waitForTimeout(1500);
+    // Bob spawns diagonally opposite (the hill is in between): he slides over towards the next corner
+  await B.keyboard.down('KeyD'); await B.waitForTimeout(2200); await B.keyboard.up('KeyD'); await A.waitForTimeout(1200);
+  // move Alice sideways until she has a clear line of fire to Bob (cover is in the way from the spawns)
+  const clear = () => A.evaluate(() => { const h = window.__ht, s = h.snaps[h.snaps.length - 1], me = h.local.t;
+    const o = [...s.players.values()].find((p) => Math.hypot(p.x - me.x, p.z - me.z) > 1);
+    return o ? h.los(me.x, me.y + 1.5, me.z, o.x, o.y + 1, o.z) : false; });
+  for (let k = 0; k < 12 && !(await clear()); k++) { await A.keyboard.down(k < 6 ? 'KeyD' : 'KeyA'); await A.waitForTimeout(350); await A.keyboard.up(k < 6 ? 'KeyD' : 'KeyA'); await A.waitForTimeout(250); }
+  console.log('clear line of fire:', await clear());
   for (let round = 0; round < 6; round++) {
     // point Alice's camera at Bob
     await A.evaluate(() => { const h = window.__ht, s = h.snaps[h.snaps.length - 1]; const me = h.local.t; const o = [...s.players.values()].find((p) => Math.hypot(p.x - me.x, p.z - me.z) > 1);

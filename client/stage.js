@@ -1,12 +1,14 @@
 // Meshes for the cover objects defined in shared/arena.js. Extents come from applyObstacles(), so
 // what you see is exactly what you collide with (collision is the 0.5 m heightfield).
 import * as pc from 'playcanvas';
+import { moundHeight } from '../shared/arena.js';
 
 const COLORS = {
   stone: [0.78, 0.58, 0.36], stoneCap: [0.66, 0.47, 0.28],
   low: [0.86, 0.70, 0.48], lowCap: [0.72, 0.55, 0.36],
   pillar: [0.74, 0.54, 0.33], pillarCap: [0.60, 0.42, 0.25],
   crate: [0.55, 0.35, 0.18], crateBand: [0.36, 0.22, 0.11],
+  sand: [0.74, 0.58, 0.37], sandTop: [0.80, 0.64, 0.42],
 };
 
 export function buildStage(app, parent, obstacles) {
@@ -31,7 +33,7 @@ export function buildStage(app, parent, obstacles) {
 
   for (const o of obstacles) {
     const { ex0, ex1, ez0, ez1 } = o;
-    if (o.type === 'ramp') { parent.addChild(wedge(app.graphicsDevice, o, mat('stone'))); continue; }
+    if (o.type === 'mound') { parent.addChild(moundMesh(app.graphicsDevice, o, mat('sand'), mat('sandTop'))); continue; }
     const h = o.h;
     if (o.kind === 'crate') {
       block(ex0, ex1, 0, h, ez0, ez1, 'crate');
@@ -50,37 +52,41 @@ export function buildStage(app, parent, obstacles) {
   }
 }
 
-// flat-shaded wedge for a ramp: slope from h0 at the start to h1 at the end
-function wedge(device, o, material) {
-  const px = -o.dz, pz = o.dx;   // sideways direction
-  const P = (u, v, y) => [o.ax + o.dx * u + px * v, y, o.az + o.dz * u + pz * v];
-  const L = o.len, W = o.hw + 0.25;
-  const a0 = P(0, -W, 0), a1 = P(0, W, 0), b0 = P(L, -W, 0), b1 = P(L, W, 0);
-  const at0 = P(0, -W, o.h0), at1 = P(0, W, o.h0), bt0 = P(L, -W, o.h1), bt1 = P(L, W, o.h1);
-  const faces = [
-    [at0, at1, bt1, bt0],   // slope
-    [a0, b0, bt0, at0],     // side
-    [a1, at1, bt1, b1],     // side
-    [a0, at0, at1, a1],     // tall end
-  ];
-  const centre = P(L / 2, 0, (o.h0 + o.h1) / 4);
-  const pos = [], nrm = [], idx = [];
-  for (const f of faces) {
-    const [p0, p1, p2] = f;
-    const u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
-    let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-    const len = Math.hypot(...n) || 1; n = n.map((c) => c / len);
-    const out = [p0[0] - centre[0], p0[1] - centre[1], p0[2] - centre[2]];
-    const flip = n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0;
-    if (flip) n = n.map((c) => -c);
-    const base = pos.length / 3;
-    for (const p of f) { pos.push(...p); nrm.push(...n); }
-    if (flip) idx.push(base, base + 2, base + 1, base, base + 3, base + 2);
-    else idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+// low-poly round hill that follows moundHeight() exactly (flat shaded facets)
+function moundMesh(device, o, slopeMat, topMat) {
+  const SEG = 28;
+  const radii = [];
+  for (let r = o.rTop; r < o.rBase - 0.01; r += 1.1) radii.push(r);
+  radii.push(o.rBase);
+  const hAt = (r) => (r >= o.rBase - 0.01 ? -0.06 : moundHeight(o, r));   // tuck the rim just under the floor
+  const ang = (i) => (i / SEG) * Math.PI * 2;
+  const pt = (r, i) => [o.cx + Math.cos(ang(i)) * r, hAt(r), o.cz + Math.sin(ang(i)) * r];
+  const build = (quads) => {
+    const pos = [], nrm = [], idx = [];
+    for (const f of quads) {
+      const [p0, p1, p2] = f;
+      const u = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], v = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+      let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const len = Math.hypot(...n) || 1; n = n.map((c) => c / len);
+      const flip = n[1] < 0;                     // every face of a hill points upwards
+      if (flip) n = n.map((c) => -c);
+      const base = pos.length / 3;
+      for (const p of f) { pos.push(...p); nrm.push(...n); }
+      if (f.length === 3) idx.push(...(flip ? [base, base + 2, base + 1] : [base, base + 1, base + 2]));
+      else idx.push(...(flip ? [base, base + 2, base + 1, base, base + 3, base + 2] : [base, base + 1, base + 2, base, base + 2, base + 3]));
+    }
+    const mesh = new pc.Mesh(device);
+    mesh.setPositions(pos); mesh.setNormals(nrm); mesh.setIndices(idx); mesh.update();
+    return mesh;
+  };
+  const slope = [];
+  for (let k = 0; k < radii.length - 1; k++) {
+    for (let i = 0; i < SEG; i++) slope.push([pt(radii[k], i), pt(radii[k], i + 1), pt(radii[k + 1], i + 1), pt(radii[k + 1], i)]);
   }
-  const mesh = new pc.Mesh(device);
-  mesh.setPositions(pos); mesh.setNormals(nrm); mesh.setIndices(idx); mesh.update();
-  const e = new pc.Entity('ramp');
-  e.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, material)], castShadows: false });
+  const top = [];
+  const c = [o.cx, o.h, o.cz];
+  for (let i = 0; i < SEG; i++) top.push([c, pt(o.rTop, i + 1), pt(o.rTop, i)]);
+  const e = new pc.Entity('hill');
+  e.addComponent('render', { meshInstances: [new pc.MeshInstance(build(slope), slopeMat), new pc.MeshInstance(build(top), topMat)], castShadows: false });
   return e;
 }

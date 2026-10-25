@@ -27,7 +27,7 @@
 照準は画面中央の十字に合わせるだけで、砲弾の落下も自動で補正して砲身の角度が決まります。
 
 - **ドリフト・ターボ**：ドリフトを押したまま横滑りするとゲージが溜まり、離すと車体の向きへ加速します（約0.55秒で青＝最高時速23m/s、約1.3秒でオレンジ＝27m/s。通常は17m/s）。横向きの勢いも前に向け直されるので、曲がり角での方向転換や、撃たれたときの回避に使えます。ゲージは照準の下に出ます。
-- **遮蔽物**：中央の高台（4方向のスロープで登れる）、各エリアのL字の壁、柱、ジャンプで越えられる低い壁、木箱。砲弾も遮るので、隠れながら撃ち合えます。名前表示も遮蔽物の向こうでは消えます。
+- **遮蔽物**：中央に丸い丘（高さ2.4m、どの方向からでも登れる）と、各スポーンの前に壁が1枚ずつ（計8枚）。砲弾も遮るので、隠れながら撃ち合えます。名前表示も遮蔽物の向こうでは消えます。
 - **リスポーン直後の無敵**：2秒間シールドが付きますが、**自分が撃つとその場で解除**されます（無敵のまま一方的に攻撃できないようにするため）。
 
 ## ローカルでの起動
@@ -48,6 +48,7 @@ npm run dev        # ビルドしてから wrangler dev を起動 → http://loc
 npm run dev                                   # 別ターミナルで起動しておく
 npm run test:bots                             # 4つのWebSocketクライアントで同期・命中・満室・存在しない部屋・再接続・無敵解除を確認
 node test/sim-drift.mjs                       # ドリフト・ターボの溜まり方と加速を確認（サーバー不要）
+node test/sim-hill.mjs                        # 中央の丘に24方向すべてから登れることを確認（サーバー不要）
 npm i --no-save playwright && npx playwright install chromium   # 初回のみ
 npm run test:browser                          # 4つの独立したブラウザで招待URL参加・同期・満室・切断・再読み込み復帰
 URL=https://<公開URL> npm run test:browser    # 公開環境に対して実行
@@ -112,7 +113,7 @@ tools/build_assets.sh <arena.blend> <Tank3.blend>
 ゲーム内の「クレジット・ライセンス」（`/credits.html`）にも掲載しています。
 
 - ステージ：**Low Poly Desert Arena** by **H4kor** — https://h4kor.itch.io/low-poly-desert-arena — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-  - 変更点：.blend から GLB に変換、3倍に拡大、カメラとライトを削除、法線を再計算、マテリアルを元の単色のまま glTF 用に再構成、頂点を量子化、当たり判定用の高さマップを生成、遮蔽物（台・スロープ・壁・柱・木箱）を追加
+  - 変更点：.blend から GLB に変換、3倍に拡大、カメラとライトを削除、法線を再計算、マテリアルを元の単色のまま glTF 用に再構成、頂点を量子化、当たり判定用の高さマップを生成、遮蔽物（中央の丸い丘と壁8枚）を追加
 - 戦車：**Tank Pack（Animated Tanks Pack）** by **Quaternius** — https://quaternius.com/packs/animatedtanks.html — [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
   - Tank3 を使用。車体と履帯、砲塔と砲身をそれぞれ結合し、アニメーションを除去、プレイヤーごとに色を変更
 - PlayCanvas Engine：MIT License

@@ -12,23 +12,27 @@ const S = [
 export const SPAWNS = S.map(([x, z]) => ({ x, z, yaw: Math.atan2(x, z) }));
 
 // ---------------------------------------------------------------- cover
-// box:  { kind, cx, cz, hx, hz, h }            axis-aligned block, top at height h
-// ramp: { kind, ax, az, dx, dz, len, hw, h0, h1 } slope starting at (ax,az) going along (dx,dz)
-//        for len metres, half-width hw, height h0 at the start and h1 at the end
+// box:   { kind, cx, cz, hx, hz, h }          axis-aligned block, top at height h
+// mound: { kind, cx, cz, rTop, rBase, h }     round hill: flat top of radius rTop at height h,
+//                                             smooth slope down to the floor at rBase (climbable from any side)
 const box = (kind, x0, z0, x1, z1, h) => ({ type: 'box', kind, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, hx: Math.abs(x1 - x0) / 2, hz: Math.abs(z1 - z0) / 2, h });
-const ramp = (kind, ax, az, dx, dz, len, hw, h0, h1) => ({ type: 'ramp', kind, ax, az, dx, dz, len, hw, h0, h1 });
+const mound = (kind, cx, cz, rTop, rBase, h) => ({ type: 'mound', kind, cx, cz, rTop, rBase, h });
 
-// one quadrant (+x,+z); repeated 4x with 90 degree rotations so every spawn is equivalent
+export function moundHeight(o, r) {
+  if (r <= o.rTop) return o.h;
+  if (r >= o.rBase) return 0;
+  const t = (r - o.rTop) / (o.rBase - o.rTop);
+  return o.h * (1 - t * t * (3 - 2 * t));     // smoothstep: max slope ~0.4, gentle enough to drive up anywhere
+}
+
+// one quadrant (+x,+z); repeated 4x with 90 degree rotations so every spawn is equivalent.
+// Kept to the minimum: something to duck behind from each spawn, nothing to get stuck on.
 const QUADRANT = [
-  box('stone', 11, 13, 17, 14.5, 3.2),     // L-shaped wall (full cover)
-  box('stone', 11, 14.5, 12.5, 19, 3.2),
-  box('crate', 19.5, 5.5, 21.5, 7.5, 1.8),  // crate (half cover, can be jumped onto from a run)
-  box('low', 5.5, 20, 10.5, 21.2, 1.3),     // low wall: blocks low shots, jump over it
-  box('pillar', -1.25, 17.75, 1.25, 20.25, 4.5),   // tall pillar in front of the edge spawn
-  ramp('stone', 5, 0, 1, 0, 6, 2, 2.2, 0),          // ramp from the centre mesa down to the floor
+  box('stone', 12, 14, 18, 15.5, 2.8),       // wall between the corner spawn and the centre
+  box('stone', -2, 18, 2, 19.5, 2.6),        // short wall in front of the edge spawn
 ];
 const CENTRE = [
-  box('stone', -5, -5, 5, 5, 2.2),          // central mesa (high ground, reached by the ramps)
+  mound('sand', 0, 0, 3.5, 12, 2.4),          // central round hill (high ground)
 ];
 
 function rot(o, k) {
@@ -36,7 +40,7 @@ function rot(o, k) {
   let r = { ...o };
   for (let i = 0; i < k; i++) {
     if (r.type === 'box') r = { ...r, cx: r.cz, cz: -r.cx, hx: r.hz, hz: r.hx };
-    else r = { ...r, ax: r.az, az: -r.ax, dx: r.dz, dz: -r.dx };
+    else r = { ...r, cx: r.cz, cz: -r.cx };
   }
   return r;
 }
@@ -50,8 +54,7 @@ export function applyObstacles(w, list = OBSTACLES) {
     let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     // bounding box of the obstacle on the grid (only those cells are tested)
     const r = o.type === 'box' ? { a: o.cx - o.hx, b: o.cx + o.hx, c: o.cz - o.hz, d: o.cz + o.hz }
-      : (() => { const ex = o.ax + o.dx * o.len, ez = o.az + o.dz * o.len, px = Math.abs(o.dz) * o.hw, pz = Math.abs(o.dx) * o.hw;
-        return { a: Math.min(o.ax, ex) - px, b: Math.max(o.ax, ex) + px, c: Math.min(o.az, ez) - pz, d: Math.max(o.az, ez) + pz }; })();
+      : { a: o.cx - o.rBase, b: o.cx + o.rBase, c: o.cz - o.rBase, d: o.cz + o.rBase };
     const ixa = Math.max(0, Math.floor((r.a - w.minX) / w.cell)), ixb = Math.min(w.nx - 1, Math.ceil((r.b - w.minX) / w.cell));
     const iza = Math.max(0, Math.floor((r.c - w.minZ) / w.cell)), izb = Math.min(w.nz - 1, Math.ceil((r.d - w.minZ) / w.cell));
     for (let iz = iza; iz <= izb; iz++) {
@@ -62,9 +65,8 @@ export function applyObstacles(w, list = OBSTACLES) {
         if (o.type === 'box') {
           if (Math.abs(x - o.cx) <= o.hx && Math.abs(z - o.cz) <= o.hz) h = o.h;
         } else {
-          const px = x - o.ax, pz = z - o.az;
-          const u = px * o.dx + pz * o.dz, v = Math.abs(-px * o.dz + pz * o.dx);
-          if (u >= 0 && u <= o.len && v <= o.hw) h = o.h0 + (o.h1 - o.h0) * (u / o.len);
+          const rr = Math.hypot(x - o.cx, z - o.cz);
+          if (rr < o.rBase) h = moundHeight(o, rr);
         }
         if (h === null) continue;
         const i = iz * w.nx + ix;

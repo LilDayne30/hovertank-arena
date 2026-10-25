@@ -41,7 +41,7 @@ const seenShells = new Set();     // remote shell ids that already got a muzzle 
 let ping = 0, fpsSmooth = 60;
 const stats = { corrections: 0, bigCorrections: 0 };
 const mats = {};
-window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
+window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
 
 // ------------------------------------------------------------------ boot
 init().catch((e) => { console.error(e); showLoading(false); $('lobby-status').textContent = `初期化に失敗しました: ${e.message}`; });
