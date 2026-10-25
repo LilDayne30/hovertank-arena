@@ -9,7 +9,7 @@ import bpy, sys, json, struct, math, mathutils
 
 args = sys.argv[sys.argv.index('--') + 1:]
 ARENA, TANK, OUT = args[0], args[1], args[2]
-ARENA_SCALE = 3.0      # Blender units -> metres (pit is ~24 BU wide; x3 gives a ~70 m pit)
+ARENA_SCALE = 4.0      # Blender units -> metres (pit is ~20 BU wide; x4 gives a ~80 m pit)
 TANK_LENGTH = 4.4      # target hull length in metres
 CELL = 0.5             # heightfield resolution (m)
 
@@ -81,7 +81,7 @@ for o in bpy.data.objects:
 
 # game coords: gx = bx, gy = bz, gz = -by
 # Only the walled pit (+/-30 m after scaling) is reachable, so sample a crop around it.
-CROP = 34.0
+CROP = 45.0
 minX, maxX = -CROP, CROP
 minZ, maxZ = -CROP, CROP
 nx = int(math.ceil((maxX - minX) / CELL)) + 1

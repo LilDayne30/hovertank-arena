@@ -3,7 +3,7 @@ import { Room, createRoom, roomInfo } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
 } from '../shared/sim.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -112,7 +112,7 @@ async function setupEngine() {
   const sens = parseFloat(store.get('ht-sens') || '1');
   $('sens').value = String(sens); setSens(sens);
 
-  camera.setPosition(30, 18, 30); camera.lookAt(0, 0, 0);
+  camera.setPosition(40, 26, 40); camera.lookAt(0, 0, 0);
   app.on('update', update);
   app.start();
 }
@@ -638,7 +638,7 @@ function updateCamera(dt) {
     let want = CAM_DIST;
     for (let d = 0.5; d <= CAM_DIST; d += 0.25) {
       const x = pivot.x - fx0 * d, y = pivot.y - fy * d + CAM_LIFT * (d / CAM_DIST), z = pivot.z - fz0 * d;
-      if (heightAt(world, x, z) + 0.45 > y || Math.abs(x) > 33 || Math.abs(z) > 33) { want = Math.max(1.2, d - 0.4); break; }
+      if (heightAt(world, x, z) + 0.45 > y || Math.abs(x) > PIT_HALF + 3 || Math.abs(z) > PIT_HALF + 3) { want = Math.max(1.2, d - 0.4); break; }
     }
     camDistNow = want < camDistNow ? want : pc.math.lerp(camDistNow, want, 1 - Math.exp(-4 * dt));
     const d = camDistNow;
@@ -680,7 +680,7 @@ function lineOfSight(ax, ay, az, bx, by, bz) {
 
 function lobbyCamera() {
   const t = performance.now() / 1000 * 0.08;
-  camera.setPosition(Math.sin(t) * 34, 20, Math.cos(t) * 34);
+  camera.setPosition(Math.sin(t) * PIT_HALF * 1.1, 26, Math.cos(t) * PIT_HALF * 1.1);
   camera.lookAt(0, 2, 0);
 }
 

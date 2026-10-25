@@ -4,10 +4,10 @@ import { makeWorld, newTank, stepTank, C, DT } from '../shared/sim.js';
 import { applyObstacles } from '../shared/arena.js';
 const meta = JSON.parse(fs.readFileSync('public/assets/arena_hf.json'));
 const b = fs.readFileSync('public/assets/arena_hf.bin');
-const w = makeWorld(meta, new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)));
-applyObstacles(w);
+// flat, empty test floor (large enough that the tank never reaches a wall)
+const w = makeWorld({ ...meta, minX: -200, minZ: -200, nx: 801, nz: 801 }, new Float32Array(801 * 801));
 const run = (driftTicks, label) => {
-  const t = newTank(-27, -26, -Math.PI / 2, 0);   // open lane along the north wall, facing +x
+  const t = newTank(0, 0, -Math.PI / 2, 0);   // open lane along the north wall, facing +x
   let seq = 0, maxSpeed = 0, boostLvl = 0;
   const inp = (mx, mz, d) => ({ seq: ++seq, mx, mz, ay: 0, ap: 0, j: false, d, f: false });
   for (let i = 0; i < 40; i++) stepTank(t, inp(1, 0, false), w);          // accelerate towards +x

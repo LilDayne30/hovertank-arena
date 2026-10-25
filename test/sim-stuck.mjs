@@ -29,7 +29,7 @@ for (const o of boxes) {
     // start somewhere around the wall
     const a = rnd() * Math.PI * 2, d = 4 + rnd() * 4;
     let x = o.cx + Math.cos(a) * (o.hx + d), z = o.cz + Math.sin(a) * (o.hz + d);
-    if (heightAt(w, x, z) > 0.5 || Math.abs(x) > 27 || Math.abs(z) > 27) { runs--; continue; }
+    if (heightAt(w, x, z) > 0.5 || Math.abs(x) > 37 || Math.abs(z) > 37) { runs--; continue; }
     const t = newTank(x, z, rnd() * 6.28, heightAt(w, x, z));
     for (let i = 0; i < 150; i++) {
       // steer roughly towards the wall with noise; jump and drift at random
@@ -44,7 +44,7 @@ for (const o of boxes) {
 // the outer arena wall (irregular mesh edge) and its corners
 for (let r = 0; r < 160; r++) {
   runs++;
-  const a = rnd() * Math.PI * 2, x = Math.cos(a) * 22, z = Math.sin(a) * 22;
+  const a = rnd() * Math.PI * 2, x = Math.cos(a) * 30, z = Math.sin(a) * 30;
   if (heightAt(w, x, z) > 0.5) { runs--; continue; }
   const t = newTank(x, z, rnd() * 6.28, heightAt(w, x, z));
   const o = { cx: Math.sign(Math.cos(a)) * 40 * (rnd() < 0.7 ? 1 : 0), cz: Math.sign(Math.sin(a)) * 40 };
@@ -76,7 +76,7 @@ for (const o of boxes) {
   for (const [sx, sz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     rams++;
     const x = o.cx + sx * (o.hx + 6), z = o.cz + sz * (o.hz + 6);
-    if (Math.abs(x) > 28 || Math.abs(z) > 28) { rams--; continue; }
+    if (Math.abs(x) > 37 || Math.abs(z) > 37) { rams--; continue; }
     const t = newTank(x, z, Math.atan2(sx, sz), heightAt(w, x, z));
     t.vx = -sx * 27; t.vz = -sz * 27; t.boost = 1; t.boostLvl = 2;
     let bad = false;

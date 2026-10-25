@@ -21,7 +21,7 @@ export const C = {
   gravity: 30,
   jumpVel: 11.5,         // ~2.2 m apex, ~0.77 s airtime
   stepMax: 0.9,          // terrain rise that can be climbed; more = wall
-  shellSpeed: 58,
+  shellSpeed: 70,       // 1.2x the original 58 m/s
   shellGravity: 9,
   shellLife: 2.4,
   shellRadius: 0.25,

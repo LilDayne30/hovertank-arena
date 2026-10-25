@@ -1,12 +1,13 @@
-// Arena-specific tuning for H4kor "Low Poly Desert Arena" scaled x3.
-// The walled pit spans roughly x,z in [-30, 30] m; the floor is flat at y = 0.
+// Arena-specific tuning for H4kor "Low Poly Desert Arena" scaled x4.
+// The walled pit spans roughly x,z in [-40, 40] m; the floor is flat at y = 0.
 // Cover objects (added on top of the original asset) are defined here as data and applied to the
 // collision heightfield on both server and client; the client builds matching meshes from them.
 
 // ---------------------------------------------------------------- spawns
+export const PIT_HALF = 40;     // half width of the walled pit (m)
 const S = [
-  [-23, -23], [23, 23], [23, -23], [-23, 23],
-  [0, -25], [0, 25], [-25, 0], [25, 0],
+  [-31, -31], [31, 31], [31, -31], [-31, 31],
+  [0, -34], [0, 34], [-34, 0], [34, 0],
 ];
 // yaw convention: forward = (-sin(yaw), -cos(yaw)); facing the centre from (x,z) => yaw = atan2(x, z)
 export const SPAWNS = S.map(([x, z]) => ({ x, z, yaw: Math.atan2(x, z) }));
@@ -28,11 +29,11 @@ export function moundHeight(o, r) {
 // one quadrant (+x,+z); repeated 4x with 90 degree rotations so every spawn is equivalent.
 // Kept to the minimum: something to duck behind from each spawn, nothing to get stuck on.
 const QUADRANT = [
-  box('stone', 12, 14, 18, 15.5, 2.8),       // wall between the corner spawn and the centre
-  box('stone', -2, 18, 2, 19.5, 2.6),        // short wall in front of the edge spawn
+  box('stone', 15.5, 19, 24.5, 20.5, 2.8),   // wall between the corner spawn and the centre
+  box('stone', -3, 25, 3, 26.5, 2.6),        // short wall in front of the edge spawn
 ];
 const CENTRE = [
-  mound('sand', 0, 0, 3.5, 12, 2.4),          // central round hill (high ground)
+  mound('sand', 0, 0, 4.5, 15, 2.6),          // central round hill (high ground)
 ];
 
 function rot(o, k) {
