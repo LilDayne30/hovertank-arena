@@ -3,7 +3,7 @@ import { Room, createRoom, roomInfo } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
 } from '../shared/sim.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -42,6 +42,8 @@ let ping = 0, fpsSmooth = 60;
 const stats = { corrections: 0, bigCorrections: 0 };
 const mats = {};
 const heal = { active: false, next: 0, e: null, tag: null };
+let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null;
+const sameTeam = (id) => rules.mode === 'team' && roster.get(id)?.team === myTeam;
 window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
 
 // ------------------------------------------------------------------ boot
@@ -52,7 +54,11 @@ async function init() {
   $('name').value = store.get('ht-name') || '';
   const rid = params.get('r');
   if (rid) { $('btn-join').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
-  $('btn-create').onclick = () => start('create');
+  // rules for a new room (remembered); when opened from an invite, show the room's rules instead
+  const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
+  $('btn-create').dataset.rules = '';
+  $('btn-create').onclick = () => start('create', null, lobbyRules.get());
+  if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
   showLoading(true, '読み込み中…');
@@ -153,7 +159,7 @@ function setSens(v) { if (input) { input.mouseSens = 0.0025 * v; input.touchSens
 function wireUi() {
   document.querySelectorAll('#quality-row button').forEach((b) => { b.onclick = () => applyQuality(b.dataset.q); });
   $('sens').oninput = (e) => setSens(parseFloat(e.target.value));
-  $('btn-settings').onclick = () => { document.exitPointerLock?.(); $('settings').classList.remove('hidden'); };
+  $('btn-settings').onclick = () => { document.exitPointerLock?.(); settingsRules.set(rules); $('btn-team').classList.toggle('hidden', rules.mode !== 'team'); $('settings').classList.remove('hidden'); };
   $('btn-settings-close').onclick = () => $('settings').classList.add('hidden');
   $('btn-invite').onclick = () => { document.exitPointerLock?.(); showInvite(); };
   $('btn-invite-close').onclick = () => $('invite').classList.add('hidden');
@@ -173,8 +179,10 @@ function wireUi() {
     if (!room) return;
     if (performance.now() - armed > 3000) { armed = performance.now(); btn.textContent = 'もう一度押すとリセット'; setTimeout(() => { btn.textContent = btn.dataset.label; }, 3000); return; }
     armed = 0; btn.textContent = btn.dataset.label;
-    room.send('newgame', 1);
+    room.send('newgame', btn.id === 'btn-newgame' ? { rules: settingsRules.get() } : 1);
   };
+  settingsRules = rulesPicker($('settings-rules'), rules, () => {});
+  $('btn-team').onclick = () => { room?.send('team', 1); $('settings').classList.add('hidden'); };
   for (const id of ['btn-newgame', 'btn-result-newgame']) { const b = $(id); b.dataset.label = b.textContent; b.onclick = newGame(b); }
   $('btn-leave').onclick = async () => { if (room) { store.sdel(`ht-token-${room.roomId}`); await room.leave(); } location.href = location.pathname; };
 }
@@ -187,14 +195,14 @@ function showLoading(on, text) { $('loading').classList.toggle('hidden', !on); i
 function banner(text) { $('banner').textContent = text || ''; $('banner').classList.toggle('hidden', !text); }
 
 // ------------------------------------------------------------------ networking
-async function start(mode, rid) {
+async function start(mode, rid, newRules) {
   const name = $('name').value.trim().slice(0, 12);
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
   showLoading(true, 'サーバーに接続中…');
   try {
     let id = rid;
-    if (mode === 'create') id = await createRoom(ENDPOINT);
+    if (mode === 'create') id = await createRoom(ENDPOINT, newRules);
     else {
       const info = await roomInfo(ENDPOINT, id);
       if (!info.exists) throw Object.assign(new Error('notfound'), { code: 'notfound' });
@@ -226,11 +234,15 @@ async function start(mode, rid) {
 }
 
 function bindRoom(r) {
-  r.onMessage('welcome', (m) => { myId = m.id; mySlot = m.slot; phase = m.phase; if (m.reconnected) { local.spawnId = -1; } });
-  r.onMessage('roster', (list) => {
+  r.onMessage('welcome', (m) => { myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+  r.onMessage('roster', (msg) => {
+    const list = Array.isArray(msg) ? msg : msg.players;
+    if (msg.rules) setRules(msg.rules);
     const seen = new Set();
     for (const p of list) { roster.set(p.id, p); seen.add(p.id); }
     for (const id of [...roster.keys()]) if (!seen.has(id)) { roster.delete(id); removeTank(id); }
+    const me = roster.get(myId);
+    if (me) { myTeam = me.team ?? 0; if (me.slot !== mySlot) { mySlot = me.slot; removeTank(myId); } }
     updateBoard();
   });
   r.onMessage('s', onSnapshot);
@@ -274,8 +286,9 @@ function onSnapshot(m) {
   for (const e of m.e) {
     if (e.t === 'hit' && e.o === myId) flashHitmark();
     if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); }
+    if (e.t === 'team' && e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が${TEAM_NAMES[e.team]}に移動`);
     if (e.t === 'newgame') {
-      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました`);
+      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました（${rulesLabel(e.rules || rules)}）`);
       $('result').classList.add('hidden'); $('settings').classList.add('hidden');
       local.spawnId = -1;
     }
@@ -284,7 +297,10 @@ function onSnapshot(m) {
     pendingEvents.push({ k: s.k, e });
   }
   if (phase !== s.ph) { phase = s.ph; if (phase === 'play') $('result').classList.add('hidden'); }
-  $('timer').textContent = `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
+  teamKills = m.tk || [0, 0];
+  $('timer').textContent = rules.goal === 'kills' ? `${rules.target}キル先取` : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
+  $('teamscore').classList.toggle('hidden', rules.mode !== 'team');
+  if (rules.mode === 'team') $('teamscore').innerHTML = `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${teamKills[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${teamKills[1]} ${TEAM_NAMES[1]}</span>`;
   heal.active = s.hl; heal.next = s.hn;
   $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? '✚ 回復アイテム 出現中（中央の丘）' : `✚ 回復まで ${s.hn}秒`;
   $('heal-ind').classList.toggle('on', s.hl);
@@ -733,7 +749,7 @@ function computeAimPoint() {
   const o = camera.getPosition(), f = camera.forward;
   let best = 160;
   for (const [id, v] of tanks) {
-    if (id === myId || !v.visible) continue;
+    if (id === myId || !v.visible || sameTeam(id)) continue;   // shells pass through teammates
     const cx = v.pos.x - o.x, cy = v.pos.y + C.hitCenterY - o.y, cz = v.pos.z - o.z;
     const tca = cx * f.x + cy * f.y + cz * f.z;
     if (tca < 0) continue;
@@ -816,7 +832,7 @@ function updateLocalShells(dt) {
       const { hitGround } = stepShell(s, world);
       if (hitGround || s.life <= 0) { dead = true; if (hitGround) fx.explosion(s.x, s.y, s.z, 1.6); break; }
       for (const [id, v] of tanks) {   // visual-only hit; the server decides damage
-        if (id === myId || !v.visible) continue;
+        if (id === myId || !v.visible || sameTeam(id)) continue;
         if (segmentHitsTank(s, { x: v.pos.x, y: v.pos.y, z: v.pos.z })) { dead = true; break; }
       }
     }
@@ -835,9 +851,41 @@ function updateBoardScores(s) {
   updateBoard();
 }
 function updateBoard() {
-  const rows = [...roster.values()].sort((a, b) => (lastScores.get(b.id) || 0) - (lastScores.get(a.id) || 0));
-  const html = rows.map((r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`).join('');
+  const byKills = (a, b) => (lastScores.get(b.id) || 0) - (lastScores.get(a.id) || 0);
+  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
+  let html;
+  if (rules.mode === 'team') {
+    html = [0, 1].map((t) => {
+      const members = [...roster.values()].filter((r) => (r.team ?? 0) === t).sort(byKills);
+      return `<div class="team-h" style="color:${rgb(TEAM_COLORS[t])}">${TEAM_NAMES[t]} <b>${teamKills[t]}</b>${t === myTeam ? '（味方）' : ''}</div>${members.map(row).join('') || '<div class="off">―</div>'}`;
+    }).join('');
+  } else html = [...roster.values()].sort(byKills).map(row).join('');
+  html = `<div class="rules-h">${rulesLabel(rules)}</div>${html}`;
   if ($('board').innerHTML !== html) $('board').innerHTML = html;
+}
+// HUD text for team colours is lightened so it stays readable on the bright desert
+function rgb(c) { return `rgb(${c.map((v) => Math.round(Math.min(1, v * 0.6 + 0.4) * 255)).join(',')})`; }
+function setRules(r) {
+  const changed = JSON.stringify(r) !== JSON.stringify(rules);
+  rules = cleanRules(r);
+  if (changed) { updateBoard(); for (const id of [...tanks.keys()]) removeTank(id); }   // colours may change
+}
+
+// small segmented control for mode / goal / target (used in the lobby and in settings)
+function rulesPicker(el, initial, onChange) {
+  let cur = cleanRules(initial);
+  el.innerHTML = `
+    <div class="row"><span class="lbl">モード</span><button data-k="mode" data-v="ffa" type="button">個人戦</button><button data-k="mode" data-v="team" type="button">チーム戦</button></div>
+    <div class="row"><span class="lbl">勝利条件</span><button data-k="goal" data-v="time" type="button">5分間で多く倒す</button><button data-k="goal" data-v="kills" type="button">先に</button>
+      <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">キル</span></div>`;
+  const paint = () => {
+    el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(cur[b.dataset.k] === b.dataset.v)));
+    const sel = el.querySelector('select'); sel.value = String(cur.target); sel.classList.toggle('dim', cur.goal !== 'kills');
+  };
+  el.querySelectorAll('button').forEach((b) => { b.onclick = () => { cur = cleanRules({ ...cur, [b.dataset.k]: b.dataset.v }); paint(); onChange(cur); }; });
+  el.querySelector('select').onchange = (e) => { cur = cleanRules({ ...cur, target: Number(e.target.value), goal: 'kills' }); paint(); onChange(cur); };
+  paint();
+  return { get: () => cur, set: (r) => { cur = cleanRules(r); paint(); } };
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 function feed(k, v) {
@@ -859,7 +907,13 @@ function flashHeal() { const h = $('hpwrap'); h.classList.add('healed'); setTime
 let noticeTimer = 0;
 function notice(html) { const n = $('notice'); n.innerHTML = html; n.classList.add('on'); clearTimeout(noticeTimer); noticeTimer = setTimeout(() => n.classList.remove('on'), 2600); }
 function flashDamage() { const h = $('damage'); h.classList.add('on'); setTimeout(() => h.classList.remove('on'), 80); }
-function showResult(list) {
+function showResult(res) {
+  const list = Array.isArray(res) ? res : res.list;
+  const w = res.winner || {};
+  const title = w.draw ? '引き分け' : w.team !== undefined ? `${TEAM_NAMES[w.team]}の勝利！` : w.id ? `${escapeHtml(nameOf(w.id))} の勝利！` : '試合終了';
+  const mine = w.team !== undefined ? w.team === myTeam : w.id === myId;
+  $('result-title').innerHTML = title + (w.draw ? '' : mine ? '<small>（あなたの勝ち）</small>' : '');
+  $('result-teams').innerHTML = res.teams ? `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${res.teams[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${res.teams[1]} ${TEAM_NAMES[1]}</span>` : '';
   const ol = $('result-list');
   ol.innerHTML = list.map((p) => `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`).join('');
   $('result-next').textContent = '10秒後に次の試合が始まります';
@@ -902,10 +956,12 @@ function updateTags() {
     if (id === myId || !v.visible) continue;
     camera.camera.worldToScreen(new pc.Vec3(v.pos.x, v.pos.y + 3.1, v.pos.z), tmp);
     if (tmp.z < 0 || tmp.x < 0 || tmp.y < 0 || tmp.x > w || tmp.y > h) continue;
-    if (!lineOfSight(o.x, o.y, o.z, v.pos.x, v.pos.y + 1.6, v.pos.z)) continue;   // no name tags through cover
+    const ally = sameTeam(id);
+    if (!ally && !lineOfSight(o.x, o.y, o.z, v.pos.x, v.pos.y + 1.6, v.pos.z)) continue;   // enemy tags hidden behind cover
     v.tag.style.display = 'block';
     v.tag.style.left = `${tmp.x}px`; v.tag.style.top = `${tmp.y}px`;
-    v.tag.firstChild.textContent = v.name || '';
+    v.tag.classList.toggle('ally', ally);
+    v.tag.firstChild.textContent = ally ? `▼ ${v.name || ''}` : (v.name || '');
     v.tag.firstChild.style.color = colorCss(v.slot);
     v.tag.querySelector('i').style.width = `${v.hp}%`;
   }

@@ -18,8 +18,10 @@ export default {
 
     if (url.pathname === '/api/rooms' && request.method === 'POST') {
       const id = roomCode();
+      let rules = null;
+      try { rules = (await request.json())?.rules ?? null; } catch { /* no body: default rules */ }
       const stub = env.ROOMS.get(env.ROOMS.idFromName(id));
-      await stub.fetch('https://room/init', { method: 'POST', headers: { 'x-room-id': id } });
+      await stub.fetch('https://room/init', { method: 'POST', headers: { 'x-room-id': id, 'content-type': 'application/json' }, body: JSON.stringify({ rules }) });
       return json({ id });
     }
 

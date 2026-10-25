@@ -4,8 +4,8 @@ export class RoomError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
 }
 
-export async function createRoom(base) {
-  const r = await fetch(`${base}/api/rooms`, { method: 'POST' });
+export async function createRoom(base, rules) {
+  const r = await fetch(`${base}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rules }) });
   if (!r.ok) throw new RoomError('create_failed', `部屋を作れませんでした (${r.status})`);
   return (await r.json()).id;
 }

@@ -14,7 +14,7 @@ function connect(roomId, name, token) {
       const [t, d] = JSON.parse(ev.data);
       if (t === 'error') { reject(Object.assign(new Error(d.code), { code: d.code })); ws.close(); }
       if (t === 'welcome') { c.welcome = d; resolve(c); }
-      if (t === 'roster') c.roster = d;
+      if (t === 'roster') c.roster = d.players || d;
       if (t === 's') { c.snaps.push(d.k); c.last = d; for (const e of d.e) { if (e.t === 'hit') c.hits++; if (e.t === 'kill') c.kills++; if (e.t === 'unshield') c.unshield.push(e.v); } }
     };
     ws.onerror = () => reject(new Error('ws error'));

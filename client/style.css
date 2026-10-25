@@ -110,3 +110,22 @@ body.touch #heal-ind { top: 58px; }
 .heal-tag { color: #6dff8a; font-size: 13px; }
 #hpwrap.healed { box-shadow: 0 0 14px 4px #6dff8a; }
 .panel .note { font-size: 12px; opacity: .75; margin: 6px 0 0; }
+
+/* modes */
+.rules { margin: 8px 0 4px; font-size: 13px; }
+.rules .row { margin-top: 6px; gap: 6px; }
+.rules .lbl { min-width: 5em; text-align: right; opacity: .8; }
+.rules .lbl2 { opacity: .8; }
+.rules button { padding: 6px 10px; font-size: 13px; background: #6b5138; color: #fff7ea; }
+.rules button[aria-pressed="true"] { background: var(--accent); color: #2b1d12; }
+.rules select { font: inherit; padding: 5px 6px; border-radius: 6px; }
+.rules select.dim { opacity: .5; }
+#lobby-room-rules { font-size: 13px; color: #ffd9a0; min-height: 0; margin: 4px 0 0; }
+#teamscore { position: absolute; left: 50%; top: 34px; transform: translateX(-50%); font-size: 16px; white-space: nowrap; }
+body:not(.touch) #teamscore:not(.hidden) ~ #heal-ind { top: 56px; }
+body.touch #teamscore { top: 56px; } body.touch #teamscore:not(.hidden) ~ #heal-ind { top: 78px; }
+#board .team-h { margin-top: 4px; font-size: 13px; }
+#board .rules-h { font-size: 11px; opacity: .75; }
+.tag.ally span { text-decoration: underline; }
+#result-title small { display: block; font-size: 13px; opacity: .8; margin-top: 4px; }
+#result-teams { font-size: 18px; margin: 0; }

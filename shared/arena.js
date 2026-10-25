@@ -87,8 +87,35 @@ export const PLAYER_COLORS = [
   [0.20, 0.45, 0.90], // blue
   [0.95, 0.75, 0.15], // yellow
   [0.25, 0.75, 0.35], // green
+  [0.95, 0.50, 0.12], // orange (2nd member of the red team)
+  [0.20, 0.78, 0.92], // cyan   (2nd member of the blue team)
 ];
-export const PLAYER_COLOR_NAMES = ['赤', '青', '黄', '緑'];
+export const PLAYER_COLOR_NAMES = ['赤', '青', '黄', '緑', '橙', '水'];
+export const TEAM_NAMES = ['赤チーム', '青チーム'];
+export const TEAM_COLORS = [[0.85, 0.22, 0.18], [0.20, 0.45, 0.90]];
+// team mode: each team starts on its own half (west = red, east = blue)
+export const TEAM_SPAWNS = [
+  SPAWNS.filter((s) => s.x < -1),
+  SPAWNS.filter((s) => s.x > 1),
+];
+
+// ---------------------------------------------------------------- rules
+// mode: 'ffa' (everyone for themselves) | 'team' (2 teams, no friendly fire)
+// goal: 'time' (most kills after MATCH_SECONDS) | 'kills' (first player/team to `target` kills)
+export const DEFAULT_RULES = { mode: 'ffa', goal: 'time', target: 10 };
+export const KILL_TARGETS = [5, 10, 15, 20];
+export const KILLS_TIME_CAP = 900;       // safety cap for kill-target games (15 min)
+export function cleanRules(r) {
+  r = r && typeof r === 'object' ? r : {};
+  return {
+    mode: r.mode === 'team' ? 'team' : 'ffa',
+    goal: r.goal === 'kills' ? 'kills' : 'time',
+    target: KILL_TARGETS.includes(Number(r.target)) ? Number(r.target) : DEFAULT_RULES.target,
+  };
+}
+export function rulesLabel(r) {
+  return `${r.mode === 'team' ? 'チーム戦' : '個人戦'}・${r.goal === 'kills' ? `${r.target}キル先取` : '5分間'}`;
+}
 
 export const MATCH_SECONDS = 300;
 // heal pickup on top of the central hill: appears every HEAL_INTERVAL s (counted from match start

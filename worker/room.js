@@ -2,7 +2,7 @@
 // 30 Hz game loop; all game rules live in shared/game.js.
 import { DurableObject } from 'cloudflare:workers';
 import { makeWorld } from '../shared/sim.js';
-import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles } from '../shared/arena.js';
+import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles, cleanRules } from '../shared/arena.js';
 import { Game } from '../shared/game.js';
 import meta from '../public/assets/arena_hf.json';
 import heights from '../public/assets/arena_hf.bin';
@@ -33,17 +33,25 @@ export class BattleRoom extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     this.roomId = request.headers.get('x-room-id') || this.roomId;
-    if (this.created === undefined) this.created = !!(await this.ctx.storage.get('created'));
+    if (this.created === undefined) {
+      this.created = !!(await this.ctx.storage.get('created'));
+      const saved = await this.ctx.storage.get('rules');
+      if (saved && this.game.size === 0) this.game.setRules(saved);
+    }
 
     if (url.pathname === '/init') {
-      await this.ctx.storage.put('created', true);
+      let rules = null;
+      try { rules = (await request.json())?.rules ?? null; } catch { /* default rules */ }
+      rules = cleanRules(rules);
+      this.game.setRules(rules);
+      await this.ctx.storage.put({ created: true, rules });
       this.created = true;
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
       return json({ ok: true });
     }
     if (url.pathname === '/info') {
       if (!this.created) return json({ exists: false }, 404);
-      return json({ exists: true, players: this.game.size, max: MAX_PLAYERS, full: this.game.isFull() });
+      return json({ exists: true, players: this.game.size, max: MAX_PLAYERS, full: this.game.isFull(), rules: this.game.rules });
     }
     if (url.pathname === '/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
@@ -97,7 +105,8 @@ export class BattleRoom extends DurableObject {
       if (type === 'i') this.game.onInput(id, data);
       else if (type === 'ping') ws.send(JSON.stringify(['pong', data]));
       else if (type === 'name') this.game.onName(id, data);
-      else if (type === 'newgame') this.game.onNewGame(id);
+      else if (type === 'newgame') { this.game.onNewGame(id, data && typeof data === 'object' ? data.rules : null); this.ctx.storage.put('rules', this.game.rules); }
+      else if (type === 'team') this.game.onSwitchTeam(id);
       else if (type === 'leave') this.drop(id, ws, true);
     });
     const onGone = () => this.drop(id, ws, false);
