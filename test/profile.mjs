@@ -47,7 +47,7 @@ const ba = await bot('alice', A.token, true), bb = await bot('bob', B.token, fal
 await new Promise((r) => setTimeout(r, 1500));
 const rp = bb.roster.players.find((p) => p.name === 'alice');
 ok(rp && rp.lv === 1 && rp.look?.paint === 'red', `roster carries level + look (alice: Lv${rp?.lv}, paint ${rp?.look?.paint})`);
-for (let i = 0; i < 40 && !(ba.prog && bb.prog); i++) await new Promise((r) => setTimeout(r, 500));
+for (let i = 0; i < (Number(process.env.WAIT) || 20) * 2 && !(ba.prog && bb.prog); i++) await new Promise((r) => setTimeout(r, 500));
 ok(!!ba.result, 'match ended');
 ok(ba.prog && ba.prog.gained > 0, `alice earned ${ba.prog?.gained} XP: ${JSON.stringify(ba.prog?.lines)}`);
 ok(bb.prog && bb.prog.gained > 0, `bob (only drove) earned ${bb.prog?.gained} XP (base XP): ${JSON.stringify(bb.prog?.lines)}`);
