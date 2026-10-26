@@ -7,11 +7,14 @@
   "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
   "durable_objects": { "bindings": [
     { "name": "ROOMS", "class_name": "BattleRoom" },
-    { "name": "MATCH", "class_name": "Matchmaker" }
+    { "name": "MATCH", "class_name": "Matchmaker" },
+    { "name": "PROFILES", "class_name": "PlayerProfile" },
+    { "name": "CODES", "class_name": "TransferCodes" }
   ] },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["BattleRoom"] },
-    { "tag": "v2", "new_sqlite_classes": ["Matchmaker"] }
+    { "tag": "v2", "new_sqlite_classes": ["Matchmaker"] },
+    { "tag": "v3", "new_sqlite_classes": ["PlayerProfile", "TransferCodes"] }
   ],
   "rules": [{ "type": "Data", "globs": ["**/*.bin"], "fallthrough": true }],
   "observability": { "enabled": true }

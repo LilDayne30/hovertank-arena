@@ -53,6 +53,11 @@
   <div id="lobby" class="panel scrollable">
     <h1>HOVER TANK <span>ARENA</span></h1>
     <p class="sub">滑って、撃って、跳べ。最大4人のオンライン対戦</p>
+    <div id="prof-bar" class="hidden">
+      <div class="pb-top"><span id="pb-lv">Lv.1</span><span id="pb-title"></span><span id="pb-xp"></span></div>
+      <div class="xpbar"><i id="pb-fill"></i></div>
+      <div class="pb-btns"><button id="btn-garage" type="button">ガレージ</button><button id="btn-missions" type="button">ミッション<span id="pb-badge"></span></button><button id="btn-transfer" type="button">引き継ぎ</button></div>
+    </div>
     <label>名前 <input id="name" maxlength="12" autocomplete="off" placeholder="Player" /></label>
     <div class="lobby-sec">
       <button id="btn-quick" type="button" class="big">クイックマッチ</button>
@@ -77,6 +82,29 @@
     <a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット・ライセンス</a>
   </div>
 
+  <div id="garage" class="panel side scrollable hidden">
+    <h2>ガレージ <small id="g-count"></small></h2>
+    <div id="g-tabs" class="tabs"></div>
+    <div id="g-items" class="items"></div>
+    <p id="g-hint" class="note"></p>
+    <div class="row"><button id="btn-g-save" type="button">決定</button><button id="btn-g-close" type="button">閉じる</button></div>
+  </div>
+
+  <div id="missions" class="panel wide scrollable hidden">
+    <h2>ミッション</h2>
+    <div id="m-tabs" class="tabs"><button type="button" data-t="daily">デイリー</button><button type="button" data-t="ach">長期（称号）</button><button type="button" data-t="lv">レベル報酬</button></div>
+    <div id="m-body"></div>
+    <div class="row"><button id="btn-m-close" type="button">閉じる</button></div>
+  </div>
+
+  <div id="transfer" class="panel scrollable hidden">
+    <h2>データ引き継ぎ</h2>
+    <p class="note">レベル・アイテム・ミッションの進み具合は、この端末に保存されたIDでサーバーに記録されています（アカウント登録は不要）。機種変更するときや、iPhoneでSafariとホーム画面版の両方で遊ぶときは、引き継ぎコードで同じデータを使えます。</p>
+    <div class="lobby-sec"><div class="sec-h">この端末のデータを別の端末で使う</div><button id="btn-tr-issue" type="button">引き継ぎコードを発行</button><p id="tr-code"></p></div>
+    <div class="lobby-sec"><div class="sec-h">別の端末のデータをこの端末で使う</div><div class="row"><input id="tr-input" placeholder="XXXX-XXXX" maxlength="12" autocomplete="off" autocapitalize="characters" /><button id="btn-tr-redeem" type="button">引き継ぐ</button></div><p id="tr-msg" class="note"></p></div>
+    <div class="row"><button id="btn-tr-close" type="button">閉じる</button></div>
+  </div>
+
   <div id="invite" class="panel hidden">
     <h2>招待URL</h2>
     <p>このURLを送ると同じ部屋に参加できます（最大4人）。</p>
@@ -94,10 +122,11 @@
     <p id="public-note" class="note hidden">クイックマッチの部屋はルール固定です（個人戦／チーム戦ごとに相手を探すため）。</p>
     <div class="row"><button id="btn-newgame" type="button">このルールでニューゲーム</button><button id="btn-team" type="button" class="hidden">チームを変える</button></div>
     <p class="note">ニューゲームは全員のスコアと試合をリセットして最初からやり直します（2回押し）。</p>
+    <div class="row"><button id="btn-garage2" type="button">ガレージ</button></div>
     <div class="row"><button id="btn-fullscreen" type="button">全画面</button><button id="btn-leave" type="button">退出</button><button id="btn-settings-close" type="button">閉じる</button></div>
   </div>
 
-  <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><p id="result-next"></p><div class="row"><button id="btn-result-newgame" type="button">すぐに次の試合へ</button></div></div>
+  <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><div id="result-xp"></div><p id="result-next"></p><div class="row"><button id="btn-result-newgame" type="button">すぐに次の試合へ</button></div></div>
   <div id="banner" class="hidden"></div>
   <div id="rotate">端末を横向きにしてください</div>
   <div id="loading" class="hidden"><div class="spinner"></div><p id="loading-text">読み込み中…</p></div>

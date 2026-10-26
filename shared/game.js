@@ -9,6 +9,11 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
 export const MAX_QUEUE = 20;   // inputs a client may bank (anti speed-hack)
 const MAX_BURST = 6;           // late inputs processed in one tick to catch up
+const LONG_KILL = 40;          // m: a kill from farther than this counts as long range
+const ACTIVE_MOVE = 40;        // m driven (or 3 shots) to count as having taken part in a match
+
+// per-player counters for one match (used for XP, missions and titles; never for gameplay)
+export const freshStats = () => ({ kills: 0, deaths: 0, hits: 0, dmg: 0, turbo: 0, orange: 0, heals: 0, jumps: 0, air: 0, turboKills: 0, longKills: 0, hillKills: 0, shots: 0, moved: 0 });
 
 export function sanitizeName(n) {
   if (typeof n !== 'string') return '';
@@ -37,6 +42,8 @@ export class Game {
     this.queuedEvents = [];      // events raised outside step() (e.g. new game), sent with the next snapshot
     this.rules = cleanRules(opts.rules || DEFAULT_RULES);
     this.winner = null;
+    this.matchStart = 0;
+    this.matchNo = 1;
   }
 
   get teamMode() { return this.rules.mode === 'team'; }
@@ -78,6 +85,7 @@ export class Game {
       tank: null, hp: C.maxHp, alive: false, respawnAt: 0, invulnUntil: 0,
       kills: 0, deaths: 0, queue: [], lastSeq: 0, lastQueued: 0, credits: 0, dropped: 0,
       connected: true, spawnId: 0, team: 0,
+      m: freshStats(), joinedAt: this.time, prof: null,
     };
     // a fresh match starts when the first player arrives in an empty room
     if (this.players.size === 0) this.resetMatch();
@@ -120,6 +128,12 @@ export class Game {
     while (p.queue.length > MAX_QUEUE) { p.queue.shift(); p.dropped++; }
   }
 
+  // cosmetic profile from the progression server: { key, lv, look } (look already validated)
+  setProfile(id, prof) {
+    const p = this.players.get(id);
+    if (p) { p.prof = prof; this.sendRoster(); }
+  }
+
   onName(id, name) {
     const p = this.players.get(id);
     if (p) { p.name = sanitizeName(name) || p.name; this.sendRoster(); }
@@ -131,7 +145,9 @@ export class Game {
     this.phaseEnds = this.time + (this.rules.goal === 'kills' ? KILLS_TIME_CAP : this.matchSeconds);
     this.shells.length = 0;
     this.heal = { active: false, nextAt: this.time + this.healInterval };
-    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; this.spawn(p); }
+    this.matchStart = this.time;
+    this.matchNo++;
+    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.m = freshStats(); p.joinedAt = this.time; this.spawn(p); }
   }
 
   // any player can start a new game (optionally with new rules): scores, timer and positions reset
@@ -171,6 +187,34 @@ export class Game {
     }
     this.winner = winner;
     this.io.broadcast('result', { list, winner, rules: this.rules, teams: this.teamMode ? this.teamKills() : null });
+    this.io.matchEnd?.(this.matchSummary(list, winner));
+  }
+
+  // what each player did this match, for XP / missions / titles (see shared/progress.js)
+  matchSummary(list, winner) {
+    const all = [...this.players.values()];
+    const isActive = (p) => p.m.moved >= ACTIVE_MOVE || p.m.shots >= 3;
+    const active = all.filter(isActive);
+    const contested = this.teamMode ? new Set(active.map((p) => p.team)).size === 2 : active.length >= 2;
+    const ranked = list.filter((r) => active.some((p) => p.id === r.id));
+    return {
+      matchNo: this.matchNo,
+      players: all.map((p) => {
+        const m = p.m;
+        const win = contested && (this.teamMode ? winner.team === p.team : winner.id === p.id);
+        const draw = contested && !!winner.draw;
+        const stats = {
+          matches: 1, kills: m.kills, deaths: m.deaths, wins: win ? 1 : 0, hits: m.hits, dmg: m.dmg, turbo: m.turbo, orange: m.orange,
+          heals: m.heals, jumps: m.jumps, air: m.air, turboKills: m.turboKills, longKills: m.longKills, hillKills: m.hillKills,
+          clean: m.kills >= 3 && m.deaths <= 1 ? 1 : 0, flawless: win && m.kills >= 3 && m.deaths === 0 ? 1 : 0, best: m.kills,
+        };
+        const ctx = {
+          active: isActive(p), minutes: Math.max(0, this.time - Math.max(this.matchStart, p.joinedAt)) / 60,
+          win, draw, place: ranked.findIndex((r) => r.id === p.id) + 1, players: active.length, team: this.teamMode,
+        };
+        return { id: p.id, prof: p.prof, stats, ctx };
+      }),
+    };
   }
 
   // advance real time (seconds); runs whole fixed ticks
@@ -212,9 +256,19 @@ export class Game {
         let inp = p.queue.shift();
         p.lastSeq = inp.seq;
         if (this.phase !== 'play') inp = { ...inp, f: false };
-        const ev = stepTank(p.tank, inp, w);
+        const t = p.tank;
+        const ev = stepTank(t, inp, w);
+        if (this.phase === 'play') {
+          p.m.moved += Math.hypot(t.vx, t.vz) * DT;
+          if (ev.jumped) p.m.jumps++;
+          if (ev.boost) { p.m.turbo++; if (ev.boost >= 2) p.m.orange++; }
+        }
         if (ev.fired) {
-          this.shells.push({ id: this.shellId++, owner: p.id, seq: p.tank.shotSeq, ...muzzle(p.tank), life: C.shellLife });
+          p.m.shots++;
+          // how the shot was fired (for missions): airborne, boosting, from the hill top
+          const onHill = t.grounded && heightAt(w, t.x, t.z) > 2.0 && Math.hypot(t.x, t.z) < 7;
+          this.shells.push({ id: this.shellId++, owner: p.id, seq: t.shotSeq, ...muzzle(t), life: C.shellLife,
+            air: !t.grounded, turbo: t.boost > 0, hill: onHill, ox: t.x, oz: t.z });
           // spawn protection is for getting your bearings, not for attacking: shooting ends it
           if (this.time < p.invulnUntil) { p.invulnUntil = this.time; events.push({ t: 'unshield', v: p.id }); }
         }
@@ -235,6 +289,7 @@ export class Game {
           if (p.hp >= C.maxHp) continue;           // full HP tanks leave it for someone who needs it
           if (Math.hypot(t.x - HEAL_POS.x, t.z - HEAL_POS.z) > HEAL_RADIUS || Math.abs(t.y - C.hoverHeight - HEAL_POS.y) > 2.5) continue;
           p.hp = C.maxHp;
+          p.m.heals++;
           this.heal = { active: false, nextAt: this.time + this.healInterval };
           events.push({ t: 'heal', v: p.id });
           break;
@@ -254,8 +309,9 @@ export class Game {
           dead = true;
           if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: s.owner, q: s.seq, v: p.id, x: r2(s.x), y: r2(s.y), z: r2(s.z) }); break; }
           p.hp -= C.damage;
+          if (owner) { owner.m.hits++; owner.m.dmg += C.damage; }
           events.push({ t: 'hit', s: s.id, o: s.owner, q: s.seq, v: p.id, hp: Math.max(0, p.hp), x: r2(s.x), y: r2(s.y), z: r2(s.z) });
-          if (p.hp <= 0) this.kill(p, s.owner, events);
+          if (p.hp <= 0) this.kill(p, s.owner, events, s);
           break;
         }
       }
@@ -272,11 +328,19 @@ export class Game {
     this.broadcastSnapshot(events);
   }
 
-  kill(p, killerId, events) {
-    p.alive = false; p.hp = 0; p.deaths++;
+  kill(p, killerId, events, shell) {
+    p.alive = false; p.hp = 0; p.deaths++; p.m.deaths++;
     p.respawnAt = this.time + C.respawnTime;
     const k = this.players.get(killerId);
-    if (k && !(this.teamMode && k.team === p.team)) k.kills++;
+    if (k && !(this.teamMode && k.team === p.team)) {
+      k.kills++; k.m.kills++;
+      if (shell) {
+        if (shell.air) k.m.air++;
+        if (shell.turbo) k.m.turboKills++;
+        if (shell.hill) k.m.hillKills++;
+        if (Math.hypot(p.tank.x - shell.ox, p.tank.z - shell.oz) >= LONG_KILL) k.m.longKills++;
+      }
+    }
     events.push({ t: 'kill', k: killerId, v: p.id, x: r2(p.tank.x), y: r2(p.tank.y), z: r2(p.tank.z) });
   }
 
@@ -284,11 +348,14 @@ export class Game {
     const w = this.world;
     // team mode: own half of the arena, away from enemies; free-for-all: farthest from everyone
     const pool = this.teamMode ? TEAM_SPAWNS[p.team] : w.spawns;
-    let best = pool[p.slot % pool.length], bestD = -1;
-    const others = [...this.players.values()].filter((o) => o !== p && o.alive && o.tank && !(this.teamMode && o.team === p.team));
-    if (others.length) {
+    let best = pool[p.slot % pool.length], bestD = -Infinity;
+    const live = [...this.players.values()].filter((o) => o !== p && o.alive && o.tank);
+    const others = live.filter((o) => !(this.teamMode && o.team === p.team));
+    const mates = live.filter((o) => this.teamMode && o.team === p.team);
+    if (others.length || mates.length) {
       for (const s of pool) {
-        const d = Math.min(...others.map((o) => Math.hypot(o.tank.x - s.x, o.tank.z - s.z)));
+        let d = others.length ? Math.min(...others.map((o) => Math.hypot(o.tank.x - s.x, o.tank.z - s.z))) : 100;
+        if (mates.some((o) => Math.hypot(o.tank.x - s.x, o.tank.z - s.z) < 8)) d -= 1000;   // don't land on a teammate
         if (d > bestD) { bestD = d; best = s; }
       }
     }
@@ -324,6 +391,8 @@ export class Game {
   }
 
   sendRoster() {
-    this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({ id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected })) });
+    this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
+      id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
+    })) });
   }
 }

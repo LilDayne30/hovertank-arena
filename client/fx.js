@@ -134,9 +134,74 @@ export class Fx {
     this.add({ mat: m.smokeLight, x: x + dx, y, z: z + dz, vx: dx * 3, vy: 1.2, vz: dz * 3, drag: 2, life: 0.6, s0: 0, s1: 1.1, curve: 'puff' });
   }
 
-  trail(x, y, z, big) {
+  trail(x, y, z, big, mat) {
     if (Math.random() > this.scale) return;
-    this.add({ mat: big ? this.m.orange : this.m.yellow, x, y, z, vy: 0.3, life: big ? 0.22 : 0.14, s0: big ? 0.55 : 0.4, s1: 0 });
+    this.add({ mat: mat || (big ? this.m.orange : this.m.yellow), x, y, z, vy: 0.3, life: big ? 0.22 : 0.14, s0: big ? 0.55 : 0.4, s1: 0 });
+  }
+
+  // cached flat / additive colour materials for cosmetic variants
+  col(rgb, additive = false, opacity = 1) {
+    const k = `${rgb.map((v) => v.toFixed(2))}:${additive}:${opacity}`;
+    this.cols ??= new Map();
+    let m = this.cols.get(k);
+    if (!m) {
+      m = new pc.StandardMaterial();
+      m.diffuse = new pc.Color(0, 0, 0); m.emissive = new pc.Color(...rgb); m.useLighting = false;
+      if (additive) { m.blendType = pc.BLEND_ADDITIVE; m.depthWrite = false; m.opacity = opacity; }
+      m.update(); this.cols.set(k, m);
+    }
+    return m;
+  }
+
+  // kill explosion in the killer's style ('std' | 'plasma' | 'firework' | 'confetti' | 'blackflame')
+  killStyle(x, y, z, color, style) {
+    if (!style || style === 'std') return this.bigKill(x, y, z, color);
+    const palette = {
+      plasma: [[0.4, 0.9, 1], [0.75, 0.45, 1], [1, 1, 1]],
+      firework: [[1, 0.3, 0.35], [0.35, 1, 0.5], [0.4, 0.6, 1], [1, 0.9, 0.3], [1, 0.5, 1]],
+      confetti: [[1, 0.35, 0.4], [1, 0.85, 0.25], [0.35, 0.8, 1], [0.5, 1, 0.5], [1, 1, 1]],
+      blackflame: [[0.12, 0.05, 0.18], [0.45, 0.1, 0.6], [0.05, 0.03, 0.06]],
+    }[style] || [[1, 0.6, 0.2]];
+    const mats = palette.map((c) => this.col(c));
+    const glow = this.col(palette[0], true, 0.7);
+    this.add({ mat: style === 'blackflame' ? mats[1] : this.m.core, x, y: y + 1, z, life: 0.16, s0: 2.5, s1: 5.5, curve: 'pop' });
+    this.add({ shape: 'torus', mat: glow, x, y: y + 0.3, z, life: 0.55, s0: 1, s1: 18, sy: 0.06, curve: 'pop' });
+    this.add({ shape: 'torus', mat: this.m.dustRing, x, y: y + 0.1, z, life: 0.8, s0: 1, s1: 11, sy: 0.15, curve: 'pop' });
+    for (let i = 0; i < this.n(12); i++) {
+      const a = rnd(0, 6.283), sp = rnd(5, 13);
+      this.add({ shape: 'box', mat: i % 3 === 0 && color ? color : this.m.debris, x, y: y + 1, z, vx: Math.cos(a) * sp, vy: rnd(7, 15), vz: Math.sin(a) * sp, g: 26, life: rnd(1.0, 1.6), s0: rnd(0.35, 0.7), s1: 0.2, spin: rnd(4, 12), floor: 0.15 });
+    }
+    if (style === 'plasma') {
+      this.add({ mat: glow, x, y: y + 1.2, z, life: 0.5, s0: 1, s1: 7, curve: 'pop' });
+      this.add({ shape: 'cylinder', mat: glow, x, y: y + 8, z, life: 0.6, s0: 1.8, s1: 0, sy: 9 });
+      for (let i = 0; i < this.n(24); i++) {
+        const a = rnd(0, 6.283), sp = rnd(16, 32);
+        this.add({ shape: 'box', mat: mats[i % 3], x, y: y + 1, z, vx: Math.cos(a) * sp, vy: rnd(-2, 6), vz: Math.sin(a) * sp, drag: 2.5, life: rnd(0.4, 0.8), s0: 0.22, s1: 0.03, align: true });
+      }
+    } else if (style === 'firework') {
+      for (let b = 0; b < 3; b++) {
+        const bx = x + rnd(-3, 3), by = y + 7 + rnd(0, 4), bz = z + rnd(-3, 3), m = mats[(b * 2) % mats.length];
+        this.add({ mat: m, x: bx, y: by, z: bz, life: 0.15, s0: 1.5, s1: 3, curve: 'pop' });
+        for (let i = 0; i < this.n(18); i++) {
+          const a = rnd(0, 6.283), e = rnd(-1, 1), sp = rnd(9, 14);
+          this.add({ shape: 'box', mat: m, x: bx, y: by, z: bz, vx: Math.cos(a) * sp * Math.sqrt(1 - e * e), vy: e * sp, vz: Math.sin(a) * sp * Math.sqrt(1 - e * e), g: 6, drag: 1.6, life: rnd(0.8, 1.3), s0: 0.22, s1: 0.04, align: true });
+        }
+      }
+    } else if (style === 'confetti') {
+      for (let i = 0; i < this.n(46); i++) {
+        const a = rnd(0, 6.283), sp = rnd(3, 10);
+        this.add({ shape: 'box', mat: mats[i % mats.length], x, y: y + 1.5, z, vx: Math.cos(a) * sp, vy: rnd(10, 20), vz: Math.sin(a) * sp, g: 9, drag: 1.4, life: rnd(1.6, 2.6), s0: 0.32, s1: 0.22, sy: 0.15, spin: rnd(6, 14), floor: 0.1 });
+      }
+    } else if (style === 'blackflame') {
+      for (let i = 0; i < this.n(9); i++) {
+        this.add({ mat: mats[i % 3], x: x + rnd(-1.5, 1.5), y: y + rnd(0.5, 2.5), z: z + rnd(-1.5, 1.5), vy: rnd(3, 7), drag: 0.8, life: rnd(0.9, 1.5), s0: 0, s1: rnd(2.5, 4.2), curve: 'puff' });
+      }
+      for (let i = 0; i < this.n(14); i++) {
+        const a = rnd(0, 6.283), sp = rnd(10, 22);
+        this.add({ shape: 'box', mat: mats[1], x, y: y + 1, z, vx: Math.cos(a) * sp, vy: rnd(4, 14), vz: Math.sin(a) * sp, g: 14, drag: 0.8, life: rnd(0.6, 1.1), s0: 0.24, s1: 0.04, align: true });
+      }
+    }
+    this.addShake(0.8, x, y, z);
   }
 
   explosion(x, y, z, size = 1.6) {
@@ -213,8 +278,9 @@ export class Fx {
   }
 
   // sparks off the back of the tracks while sliding; colour shows the drift charge level
-  driftSparks(x, y, z, yaw, level) {
-    const mat = level >= 2 ? this.m.orange : level >= 1 ? this.m.blue : this.m.white;
+  driftSparks(x, y, z, yaw, level, baseMat) {
+    // level colours (blue / orange) tell everyone the boost charge; only the base colour is cosmetic
+    const mat = level >= 2 ? this.m.orange : level >= 1 ? this.m.blue : baseMat || this.m.white;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw), rx = Math.cos(yaw), rz = -Math.sin(yaw);
     for (const side of [-1, 1]) {
       if (Math.random() > 0.75 * this.scale + 0.2) continue;

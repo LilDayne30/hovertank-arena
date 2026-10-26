@@ -4,6 +4,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { makeWorld } from '../shared/sim.js';
 import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles, cleanRules } from '../shared/arena.js';
 import { Game } from '../shared/game.js';
+import { TOKEN_RE, profileKey, profileStub } from './profile.js';
 import meta from '../public/assets/arena_hf.json';
 import heights from '../public/assets/arena_hf.bin';
 
@@ -27,6 +28,7 @@ export class BattleRoom extends DurableObject {
     this.game = new Game(world, {
       send: (id, type, data) => this.sendTo(id, type, data),
       broadcast: (type, data) => this.broadcast(type, data),
+      matchEnd: (summary) => this.awardMatch(summary),
     }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined });
   }
 
@@ -115,11 +117,40 @@ export class BattleRoom extends DurableObject {
         this.ctx.storage.put('rules', this.game.rules);
       }
       else if (type === 'team') this.game.onSwitchTeam(id);
+      else if (type === 'prof') this.attachProfile(id, data);
+      else if (type === 'look') { const p = this.game.players.get(id); if (p?.prof) this.attachProfile(id, null, p.prof.key); }
       else if (type === 'leave') this.drop(id, ws, true);
     });
     const onGone = () => this.drop(id, ws, false);
     ws.addEventListener('close', onGone);
     ws.addEventListener('error', onGone);
+  }
+
+  // the client sends its profile token once after joining; the room only keeps the hashed key
+  async attachProfile(id, token, key) {
+    if (!this.env.PROFILES) return;
+    try {
+      if (!key) { if (typeof token !== 'string' || !TOKEN_RE.test(token)) return; key = await profileKey(token); }
+      const b = await (await profileStub(this.env, key).fetch('https://profile/brief')).json();
+      if (this.game.players.has(id)) this.game.setProfile(id, { key, lv: b.lv, look: b.look });
+    } catch (e) { console.warn('profile', e?.message); }
+  }
+
+  // match over: report every player's stats to their profile and send them what they earned
+  awardMatch(summary) {
+    if (!this.env.PROFILES) return;
+    const matchId = `${this.roomId}:${this.startedAt || (this.startedAt = Date.now())}:${summary.matchNo}`;
+    for (const e of summary.players) {
+      if (!e.prof?.key) continue;
+      const req = profileStub(this.env, e.prof.key).fetch('https://profile/award', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ matchId, stats: e.stats, ctx: e.ctx }),
+      }).then((r) => r.json()).then((res) => {
+        this.sendTo(e.id, 'prog', res);
+        const p = this.game.players.get(e.id);
+        if (p?.prof && res.after && res.after.level !== p.prof.lv) this.game.setProfile(e.id, { ...p.prof, lv: res.after.level });
+      }).catch((err) => console.warn('award', err?.message));
+      this.ctx.waitUntil?.(req);
+    }
   }
 
   drop(id, ws, consented) {

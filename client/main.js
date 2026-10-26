@@ -8,6 +8,10 @@ import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
 import { setupPwa } from './pwa.js';
+import { Looks, emblemSvg } from './looks.js';
+import { Profile } from './profile.js';
+import { setupProgressUi, titleName } from './progress-ui.js';
+import { DEFAULT_LOOK } from '../shared/progress.js';
 
 // ------------------------------------------------------------------ config
 const ENDPOINT = location.origin;   // the Worker serves both the page and /api
@@ -25,7 +29,8 @@ const store = {
 };
 
 // ------------------------------------------------------------------ globals
-let app, device, world, tankAsset, camera, root, fx;
+let app, device, world, tankAsset, camera, root, fx, looks, profile, pui;
+const preview = { look: null, yaw: 0.6, v: null };   // garage preview (lobby: its own tank on the hill; in a room: your tank)
 let input;
 let room = null, myId = null, mySlot = 0, phase = 'play';
 const roster = new Map();         // id -> {name, slot, connected}
@@ -68,6 +73,19 @@ async function init() {
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
+  profile = new Profile(ENDPOINT);
+  pui = setupProgressUi({
+    profile,
+    inRoom: () => !!room,
+    onPreview: (look) => {
+      preview.look = look ? { ...look } : null;
+      if (room) { removeTank(myId); input.enabled = !look; if (look) { document.exitPointerLock?.(); input.reset(); } }
+      if (preview.v) { removeTank('__preview'); preview.v = null; }
+    },
+    onSaved: () => { if (room) room.send('look', 1); },
+  });
+  profile.load().catch((e) => console.warn('profile', e.message));
+  if (DEBUG) window.__ht.preview = (look) => { preview.look = look ? { ...DEFAULT_LOOK, ...look } : null; if (preview.v) removeTank('__preview'); $('lobby').classList.toggle('hidden', !!look); };
   const pwa = setupPwa({
     onOffline: (off) => {
       $('offline').classList.toggle('hidden', !off);
@@ -126,6 +144,7 @@ async function setupEngine() {
   const cover = applyObstacles(world);
   const [arena, tank] = await Promise.all([loadContainer(`${base}assets/arena.glb`), loadContainer(`${base}assets/tank.glb`)]);
   tankAsset = tank;
+  looks = new Looks(app, device, tank);
   root.addChild(arena.resource.instantiateRenderEntity());
   buildStage(app, root, cover);
   makeMaterials();
@@ -269,19 +288,24 @@ async function start(mode, rid, newRules, qmMode) {
 }
 
 function bindRoom(r) {
-  r.onMessage('welcome', (m) => { myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+  r.onMessage('welcome', (m) => {
+    const sendProf = () => { if (profile.token) r.send('prof', profile.token); };
+    if (profile.token) sendProf(); else profile.load().then(sendProf).catch(() => {});
+    myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
     const seen = new Set();
-    for (const p of list) { roster.set(p.id, p); seen.add(p.id); }
+    for (const p of list) { p.look = { ...DEFAULT_LOOK, ...(p.look || {}) }; p.key = `${p.slot}|${JSON.stringify(p.look)}`; roster.set(p.id, p); seen.add(p.id); }
     for (const id of [...roster.keys()]) if (!seen.has(id)) { roster.delete(id); removeTank(id); }
     const me = roster.get(myId);
     if (me) { myTeam = me.team ?? 0; if (me.slot !== mySlot) { mySlot = me.slot; removeTank(myId); } }
+    for (const [id, v] of tanks) { const r = roster.get(id); if (r && v.key !== lookKeyFor(id) && id !== '__preview') removeTank(id); }
     updateBoard();
   });
   r.onMessage('s', onSnapshot);
   r.onMessage('result', showResult);
+  r.onMessage('prog', (res) => { if (DEBUG) (window.__ht.progs ??= []).push(res); profile.applyProgress(res); pui.showMatchProgress(res); });
   r.onMessage('pong', (t) => { ping = ping ? ping * 0.7 + (performance.now() - t) * 0.3 : performance.now() - t; });
   r.onDrop(() => { banner('接続が切れました。再接続中…'); input.reset(); });
   r.onReconnect(() => { banner(''); store.sset(`ht-token-${r.roomId}`, r.reconnectionToken); local.spawnId = -1; });
@@ -383,7 +407,10 @@ function fromServer(p) {
 function update(dt) {
   dt = Math.min(dt, 0.1);
   fpsSmooth = fpsSmooth * 0.95 + (1 / Math.max(dt, 1e-4)) * 0.05;
-  if (!room || !myId) { lobbyCamera(dt); fx.update(dt); return; }
+  if (!room || !myId) {
+    if (preview.look && looks) garagePreview(dt); else { if (tanks.has('__preview')) removeTank('__preview'); lobbyCamera(dt); }
+    fx.update(dt); return;
+  }
 
   const [lx, ly] = input.takeLook();
   camYaw = wrapPi(camYaw - lx);
@@ -403,7 +430,7 @@ function update(dt) {
   if (rt !== null) { renderRemote(rt, dt); flushEvents(rt); }
   tankFx(dt);
   updateHealPickup(dt);
-  updateCamera(dt);
+  if (preview.look) garageCamera(dt, tanks.get(myId)?.pos); else updateCamera(dt);
   computeAimPoint();
   updateLocalShells(dt);
   fx.update(dt);
@@ -531,33 +558,27 @@ function updateHealPickup() {
 }
 
 // ------------------------------------------------------------------ tanks
-function getTank(id, slot) {
+// the look a tank is drawn with: the garage preview for yourself while it is open, else the roster's
+function lookFor(id) {
+  if (id === '__preview') return preview.look || DEFAULT_LOOK;
+  if (id === myId && preview.look) return preview.look;
+  return roster.get(id)?.look || (id === myId ? pui?.look : null) || DEFAULT_LOOK;
+}
+function slotFor(id) { return id === '__preview' ? 0 : id === myId ? mySlot : roster.get(id)?.slot ?? 0; }
+function lookKeyFor(id) { return `${slotFor(id)}|${JSON.stringify(lookFor(id))}`; }
+
+function getTank(id) {
   let v = tanks.get(id);
-  if (v) return v;
-  const e = tankAsset.resource.instantiateRenderEntity();
-  const col = PLAYER_COLORS[slot % 4];
-  const cache = new Map();
-  for (const r of e.findComponents('render')) {
-    for (const mi of r.meshInstances) {
-      const m = mi.material;
-      if (!cache.has(m)) {
-        const c = m.clone();
-        if (/^Main/.test(m.name)) {
-          const shade = m.name === 'Main_Dark' ? 0.62 : m.name === 'Main_Light' ? 1.18 : m.name === 'Main_Details' ? 0.35 : 0.9;
-          c.diffuse = new pc.Color(Math.min(1, col[0] * shade), Math.min(1, col[1] * shade), Math.min(1, col[2] * shade));
-        }
-        c.update();
-        cache.set(m, c);
-      }
-      mi.material = cache.get(m);
-    }
-  }
+  if (v && v.key === lookKeyFor(id)) return v;
+  if (v) removeTank(id);
+  const slot = slotFor(id), look = lookFor(id);
+  const { e, turret, paintMats, glowMats, outlines } = looks.build(look, slot);
   root.addChild(e);
   const shadow = new pc.Entity('shadow');
   shadow.addComponent('render', { type: 'plane', material: mats.shadow, castShadows: false });
   root.addChild(shadow);
   const hover = new pc.Entity('hover');
-  hover.addComponent('render', { type: 'plane', material: mats.hover, castShadows: false });
+  hover.addComponent('render', { type: 'plane', material: looks.hoverMat(look, mats.hover), castShadows: false });
   root.addChild(hover);
   const shieldMat = new pc.StandardMaterial();
   shieldMat.diffuse = new pc.Color(0, 0, 0); shieldMat.emissive = new pc.Color(0.4, 0.85, 1); shieldMat.opacity = 0.3;
@@ -569,15 +590,21 @@ function getTank(id, slot) {
   e.addChild(shield);
   const tag = document.createElement('div');
   tag.className = 'tag';
-  tag.innerHTML = '<span></span><div class="bar"><i></i></div>';
+  tag.innerHTML = '<span class="nm"></span><div class="bar"><i></i></div>';
   $('tags').appendChild(tag);
   v = {
-    e, turret: e.findByName('Turret'), shadow, hover, shield, shieldMat, tag, slot, hp: C.maxHp, visible: true,
-    pos: new pc.Vec3(), yaw: 0, vx: 0, vz: 0, mats: [...cache.values()], flash: 0, recoil: 0, smokeT: 0,
-    grounded: true, drifting: false, charge: 0, boost: 0, boostLvl: 0, lastSpawn: -1,
+    e, turret, shadow, hover, shield, shieldMat, tag, slot, hp: C.maxHp, visible: true, key: lookKeyFor(id), look,
+    pos: new pc.Vec3(), yaw: 0, vx: 0, vz: 0, mats: paintMats, glowMats, outlines, rel: null, flash: 0, recoil: 0, smokeT: 0,
+    grounded: true, drifting: false, charge: 0, boost: 0, boostLvl: 0, lastSpawn: -1, trail: looks.trailMats(look),
   };
+  looks.setRelation(v, relationOf(id));
   tanks.set(id, v);
   return v;
+}
+// outline colour: red = enemy, blue = teammate, none = yourself
+function relationOf(id) {
+  if (id === '__preview') return (DEBUG && window.__ht.previewRel) || 'none';
+  return id === myId ? 'none' : sameTeam(id) ? 'ally' : 'enemy';
 }
 function removeTank(id) {
   const v = tanks.get(id);
@@ -628,7 +655,7 @@ function placeTank(v, x, y, z, yaw, aimYaw, vx, vz, visible, invuln, time) {
 
 function renderLocal(alpha) {
   if (!myId) return;
-  const v = getTank(myId, mySlot);
+  const v = getTank(myId);
   if (!local.alive || !local.t) { placeTank(v, 0, 0, 0, 0, 0, 0, 0, false); return; }
   const a = local.prev, b = local.t;
   const x = pc.math.lerp(a.x, b.x, alpha) + local.offset.x;
@@ -663,8 +690,8 @@ function renderRemote(rt) {
     const pa = a.players.get(id) || pb;
     const r = roster.get(id);
     if (!r) continue;                       // wait for the roster so the colour is right
-    if (tanks.get(id) && tanks.get(id).slot !== r.slot) removeTank(id);
-    const v = getTank(id, r.slot);
+    const v = getTank(id);
+    looks.setRelation(v, relationOf(id));
     const vis = pa.alive && pb.alive && pa.connected && pa.spawnId === pb.spawnId;
     const x = pc.math.lerp(pa.x, pb.x, f), y = pc.math.lerp(pa.y, pb.y, f), z = pc.math.lerp(pa.z, pb.z, f);
     const yaw = pa.yaw + wrapPi(pb.yaw - pa.yaw) * f;
@@ -699,7 +726,7 @@ function renderRemote(rt) {
       const ov = tanks.get(s.owner); if (ov) ov.recoil = 1;
       if (seenShells.size > 300) seenShells.clear();
     }
-    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - C.shellGravity * dt, s.vz);
+    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - C.shellGravity * dt, s.vz, s.owner);
     used.add(`r${s.id}`);
   }
   for (const [key, e] of shellEnts) if (key[0] === 'r' && !used.has(key)) freeShell(key, e);
@@ -723,7 +750,7 @@ function flushEvents(rt) {
       if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); }
     } else if (e.t === 'kill') {
       const slot = roster.get(e.v)?.slot ?? 0;
-      fx.bigKill(e.x, e.y, e.z, mats.slotLit[slot % 4]);
+      fx.killStyle(e.x, e.y, e.z, mats.slotLit[slot % 4], roster.get(e.k)?.look?.boom);
       feed(e.k, e.v);
       if (e.v === myId) centerFlash('撃破された…', 1800);
       else if (e.k === myId) { centerFlash('撃破！', 1200, true); fx.addShake(0.3); }
@@ -745,7 +772,7 @@ function tankFx(dt) {
     }
     if (!v.visible) continue;
     const gy = heightAt(world, v.pos.x, v.pos.z);
-    if (v.drifting && v.pos.y - C.hoverHeight - gy < 0.3) fx.driftSparks(v.pos.x, gy, v.pos.z, v.yaw, v.charge >= C.charge2 ? 2 : v.charge >= C.charge1 ? 1 : 0);
+    if (v.drifting && v.pos.y - C.hoverHeight - gy < 0.3) fx.driftSparks(v.pos.x, gy, v.pos.z, v.yaw, v.charge >= C.charge2 ? 2 : v.charge >= C.charge1 ? 1 : 0, looks.sparkMat(v.look));
     if (v.boost > 0) fx.exhaust(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, v.boostLvl);
     v.smokeT -= dt;
     if (v.hp <= 67 && v.smokeT <= 0) { fx.damageSmoke(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.hp <= 34); v.smokeT = v.hp <= 34 ? 0.1 / fx.scale : 0.35 / fx.scale; }
@@ -809,6 +836,31 @@ function lineOfSight(ax, ay, az, bx, by, bz) {
   return true;
 }
 
+// garage: the tank sits on the right of the screen (the item list is on the left), slowly turning
+function garagePreview(dt) {
+  const v = getTank('__preview');
+  preview.yaw += dt * 0.45;
+  const t = performance.now() / 1000;
+  const y = HEAL_POS.y + C.hoverHeight;
+  placeTank(v, 0, y, 0, preview.yaw, preview.yaw + Math.sin(t * 0.7) * 0.5, 0, 0, true, false, t);
+  tankFx(dt);
+  garageCamera(dt, v.pos, true);
+}
+function garageCamera(dt, pos, fixed) {
+  if (!pos) return;
+  const t = performance.now() / 1000;
+  const ang = fixed ? 0.9 : t * 0.25, d = 9.5;
+  const cx = pos.x + Math.sin(ang) * d, cz = pos.z + Math.cos(ang) * d, cy = pos.y + 3.2;
+  camera.camera.fov = BASE_FOV;
+  camera.setPosition(cx, cy, cz);
+  // shift the look target left so the tank lands in the right part of the screen
+  const fxv = pos.x - cx, fzv = pos.z - cz, len = Math.hypot(fxv, fzv);
+  const rx = -fzv / len, rz = fxv / len;   // camera right (on the ground plane)
+  const aspect = (app.graphicsDevice.width || 16) / (app.graphicsDevice.height || 9);
+  const k = d * Math.tan((BASE_FOV * Math.PI) / 360) * aspect * (innerWidth > 700 ? 0.42 : 0.38);
+  camera.lookAt(pos.x - rx * k, pos.y + 1.0, pos.z - rz * k);
+}
+
 function lobbyCamera() {
   const t = performance.now() / 1000 * 0.08;
   camera.setPosition(Math.sin(t) * PIT_HALF * 1.1, 26, Math.cos(t) * PIT_HALF * 1.1);
@@ -817,7 +869,8 @@ function lobbyCamera() {
 
 // ------------------------------------------------------------------ shells
 const shellEnts = new Map(), shellPool = [];
-function drawShell(key, x, y, z, vx, vy, vz) {
+function drawShell(key, x, y, z, vx, vy, vz, owner) {
+  const trail = tanks.get(owner)?.trail;
   let e = shellEnts.get(key);
   if (!e) {
     e = shellPool.pop();
@@ -837,7 +890,8 @@ function drawShell(key, x, y, z, vx, vy, vz) {
   const sp = Math.hypot(vx, vy, vz) || 1;
   e.lookAt(x + vx / sp, y + vy / sp, z + vz / sp);
   e.setLocalScale(0.28, 0.28, 1.9);
-  fx.trail(x, y, z, false);
+  e.render.material = trail?.shell || fx.m.shell;
+  fx.trail(x, y, z, false, trail?.puff);
 }
 function freeShell(key, e) { e.enabled = false; shellEnts.delete(key); shellPool.push(e); }
 
@@ -873,7 +927,7 @@ function updateLocalShells(dt) {
     }
     if (dead) { killLocalShell(s.seq, false); continue; }
     const f = s.acc / DT;
-    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz);
+    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz, myId);
   }
 }
 
@@ -887,7 +941,7 @@ function updateBoardScores(s) {
 }
 function updateBoard() {
   const byKills = (a, b) => (lastScores.get(b.id) || 0) - (lastScores.get(a.id) || 0);
-  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
+  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${r.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r.look?.emblem, 12)}${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
   let html;
   if (rules.mode === 'team') {
     html = [0, 1].map((t) => {
@@ -950,7 +1004,8 @@ function showResult(res) {
   $('result-title').innerHTML = title + (w.draw ? '' : mine ? '<small>（あなたの勝ち）</small>' : '');
   $('result-teams').innerHTML = res.teams ? `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${res.teams[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${res.teams[1]} ${TEAM_NAMES[1]}</span>` : '';
   const ol = $('result-list');
-  ol.innerHTML = list.map((p) => `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`).join('');
+  ol.innerHTML = list.map((p) => { const r = roster.get(p.id); return `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${r?.lv ? `<small>Lv${r.lv}</small> ` : ''}${emblemSvg(r?.look?.emblem, 14)}${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`; }).join('');
+  pui.clearMatchProgress();
   $('result-next').textContent = '10秒後に次の試合が始まります';
   $('result').classList.remove('hidden');
   document.exitPointerLock?.();
@@ -995,9 +1050,15 @@ function updateTags() {
     if (!ally && !lineOfSight(o.x, o.y, o.z, v.pos.x, v.pos.y + 1.6, v.pos.z)) continue;   // enemy tags hidden behind cover
     v.tag.style.display = 'block';
     v.tag.style.left = `${tmp.x}px`; v.tag.style.top = `${tmp.y}px`;
-    v.tag.classList.toggle('ally', ally);
-    v.tag.firstChild.textContent = ally ? `▼ ${v.name || ''}` : (v.name || '');
-    v.tag.firstChild.style.color = colorCss(v.slot);
+    const r = roster.get(id);
+    const tk = `${ally}|${v.name}|${r?.lv}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}`;
+    if (v.tagKey !== tk) {
+      v.tagKey = tk;
+      v.tag.className = `tag frame-${r?.look?.frame || 'none'}${ally ? ' ally' : ''}`;
+      const ttl = titleName(r?.look?.title);
+      v.tag.firstChild.innerHTML = `${ally ? '▼ ' : ''}${r?.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r?.look?.emblem, 12)}${escapeHtml(v.name || '')}${ttl ? `<span class="ttl">${escapeHtml(ttl)}</span>` : ''}`;
+      v.tag.firstChild.style.color = colorCss(v.slot);
+    }
     v.tag.querySelector('i').style.width = `${v.hp}%`;
   }
 }
