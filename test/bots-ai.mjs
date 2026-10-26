@@ -31,6 +31,13 @@ function run(levels, seconds, rules = {}) {
   return { g, bots, st, ticks };
 }
 
+// strength by level (quick match): Lv1 weaker than Lv50
+{
+  const { skillForLevel, botParams } = await import('../shared/bot.js');
+  const lo = botParams(skillForLevel(1)), mid = botParams(skillForLevel(25)), hi = botParams(skillForLevel(50));
+  ok(lo.aimErr > mid.aimErr && mid.aimErr > hi.aimErr, `aim spread by level: Lv1 ${lo.aimErr.toFixed(2)} m, Lv25 ${mid.aimErr.toFixed(2)} m, Lv50 ${hi.aimErr.toFixed(2)} m`);
+}
+
 // 4 normal bots, 3 minutes
 {
   const { bots, st } = run(['normal', 'normal', 'normal', 'normal'], 180);
@@ -75,9 +82,26 @@ function run(levels, seconds, rules = {}) {
   ok(g.botCount === 2, `humans leave -> bots come back (${g.botCount})`);
   g.removePlayer('h2'); g.removePlayer('h1');
   ok(g.players.size === 0, 'last human leaves -> bots leave too');
+  // quick match with a chosen size; bots look like players and follow the people's level
+  let roster = null;
+  const g3 = new Game(world, { send() {}, broadcast: (t, d) => { if (t === 'roster') roster = d; } }, { autoFill: true, rules: { size: 2 } });
+  g3.addPlayer('h1', 'human');
+  ok(g3.players.size === 2 && g3.botCount === 1, `quick match size 2 (1対1): ${g3.humans} human + ${g3.botCount} bot`);
+  const rb = roster.players.find((p) => p.id !== 'h1');
+  ok(rb.bot === undefined && rb.lv >= 1 && !/CPU/.test(rb.name), `quick-match bot is not labelled as CPU (name ${rb.name}, Lv${rb.lv})`);
+  const before = [...g3.players.values()].find((p) => p.bot).bot.skill;
+  g3.setProfile('h1', { key: 'x', lv: 45, look: null });
+  const bot = [...g3.players.values()].find((p) => p.bot);
+  ok(bot.bot.skill > before + 0.3 && Math.abs(bot.prof.lv - 45) <= 3, `bot follows the player's level: skill ${before.toFixed(2)} -> ${bot.bot.skill.toFixed(2)} (shown as Lv${bot.prof.lv})`);
+  g3.addPlayer('h2', 'friend');
+  ok(g3.humans === 2 && g3.botCount === 0 && g3.isFull(), 'size 2: a second person takes the bot seat, room full');
+  const g4 = new Game(world, { send() {}, broadcast() {} }, { autoFill: true, rules: { size: 3 } });
+  g4.addPlayer('h1', 'a');
+  ok(g4.players.size === 3, `quick match size 3: ${g4.players.size} tanks`);
   const g2 = new Game(world, { send() {}, broadcast() {} }, { rules: { bots: 2, botLevel: 'hard' } });
   g2.addPlayer('h1', 'human');
   ok(g2.botCount === 2 && [...g2.players.values()].filter((p) => p.bot).every((p) => p.bot.level === 'hard'), 'invite room with rules.bots = 2 (hard)');
   g2.setRules({ bots: 1, botLevel: 'easy' });
   ok(g2.botCount === 1 && [...g2.players.values()].find((p) => p.bot).bot.level === 'easy', 'new rules: 1 easy bot');
+  ok([...g2.players.values()].find((p) => p.bot).prof.bot === true, 'private-room bots keep the CPU label');
 }

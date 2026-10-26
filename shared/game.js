@@ -4,7 +4,7 @@ import {
   C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate,
 } from './sim.js';
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
-import { BotBrain, BOT_NAMES, randomLook } from './bot.js';
+import { BotBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel } from './bot.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -51,35 +51,68 @@ export class Game {
     this.botSeq = 0;
   }
 
+  // seats in this room: quick-match rooms use the chosen size, invite rooms always 4
+  get capacity() { return this.autoFill ? this.rules.size : MAX_PLAYERS; }
   get humans() { let n = 0; for (const p of this.players.values()) if (!p.bot) n++; return n; }
   get botCount() { return this.players.size - this.humans; }
 
   wantedBots() {
     const h = this.humans;
     if (h === 0) return 0;
-    if (this.autoFill) return MAX_PLAYERS - h;
+    if (this.autoFill) return Math.max(0, this.capacity - h);
     return Math.min(this.rules.bots || 0, MAX_PLAYERS - h);
+  }
+
+  // average level of the people in the room (quick-match bots are matched to it)
+  humanLevel() {
+    const lv = [...this.players.values()].filter((p) => !p.bot).map((p) => p.prof?.lv || 1);
+    return lv.length ? lv.reduce((a, b) => a + b, 0) / lv.length : 1;
   }
 
   addBot(level) {
     const used = new Set([...this.players.values()].map((p) => p.name));
-    const name = BOT_NAMES.find((n) => !used.has(n)) || `ボット${this.botSeq + 1}`;
     const id = `cpu${++this.botSeq}`;
+    if (this.autoFill) {
+      // quick match: a regular-looking opponent whose strength follows the players' level
+      const pool = QM_NAMES.filter((n) => !used.has(n));
+      const name = pool[Math.floor(Math.random() * pool.length)] || `Player${100 + this.botSeq}`;
+      const avg = this.humanLevel();
+      const lv = Math.max(1, Math.min(50, Math.round(avg + (Math.random() * 6 - 3))));
+      const p = this.addPlayer(id, name, { bot: new BotBrain(this.botSkill(lv)) });
+      p.prof = { lv, look: randomLook(lv), hidden: true };
+      return p;
+    }
+    const name = BOT_NAMES.find((n) => !used.has(n)) || `ボット${this.botSeq + 1}`;
     const p = this.addPlayer(id, name, { bot: new BotBrain(level) });
     p.prof = { lv: 0, look: randomLook(), bot: true };
     return p;
+  }
+  botSkill(lv) { return Math.max(0, Math.min(1, skillForLevel(lv) + (Math.random() * 0.12 - 0.06))); }
+
+  // quick match: when the people's levels become known (profiles load after joining), retune bots
+  retuneBots() {
+    if (!this.autoFill) return;
+    const avg = this.humanLevel();
+    for (const p of this.players.values()) {
+      if (!p.bot || !p.prof?.hidden) continue;
+      if (Math.abs((p.prof.tunedFor ?? -99) - avg) < 0.5) continue;
+      p.prof.tunedFor = avg;
+      p.prof.lv = Math.max(1, Math.min(50, Math.round(avg + (Math.random() * 6 - 3))));
+      p.prof.look = randomLook(p.prof.lv);
+      p.bot.setSkill(this.botSkill(p.prof.lv));
+    }
   }
 
   // add / remove bots to match wantedBots(); keeps teams even by moving bots, never humans
   syncBots() {
     const want = this.wantedBots();
-    const level = (i) => (this.autoFill ? ['normal', 'easy', 'easy'][i % 3] : this.rules.botLevel);   // quick match: gentle for newcomers
+    const level = () => this.rules.botLevel;
     let changed = false;
     while (this.botCount > want) {
       const bots = [...this.players.values()].filter((p) => p.bot);
       this.removePlayer(bots[bots.length - 1].id, true); changed = true;
     }
-    while (this.botCount < want && this.players.size < MAX_PLAYERS) { this.addBot(level(this.botCount)); changed = true; }
+    while (this.botCount < want && this.players.size < this.capacity) { this.addBot(level()); changed = true; }
     for (const p of this.players.values()) if (p.bot && !this.autoFill && p.bot.level !== this.rules.botLevel) { p.bot = new BotBrain(this.rules.botLevel); changed = true; }
     if (this.teamMode) {
       const n = [0, 0]; for (const p of this.players.values()) n[p.team]++;
@@ -121,11 +154,11 @@ export class Game {
   }
 
   get size() { return this.players.size; }
-  isFull() { return this.humans >= MAX_PLAYERS; }   // bots give their seat up for humans
+  isFull() { return this.humans >= this.capacity; }   // bots give their seat up for humans
 
   addPlayer(id, name, extra = {}) {
     // a human arriving in a room full of bots takes a bot's seat
-    if (!extra.bot && this.players.size >= MAX_PLAYERS) {
+    if (!extra.bot && this.players.size >= this.capacity) {
       const b = [...this.players.values()].reverse().find((p) => p.bot);
       if (b) this.removePlayer(b.id, true);
     }
@@ -185,7 +218,7 @@ export class Game {
   // cosmetic profile from the progression server: { key, lv, look } (look already validated)
   setProfile(id, prof) {
     const p = this.players.get(id);
-    if (p) { p.prof = prof; this.sendRoster(); }
+    if (p) { p.prof = prof; this.retuneBots(); this.sendRoster(); }
   }
 
   onName(id, name) {
@@ -447,7 +480,9 @@ export class Game {
 
   sendRoster() {
     this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
-      id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null, bot: p.bot ? p.bot.level : undefined,
+      id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
+      // private rooms label CPU players; quick-match bots look like everyone else
+      bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined,
     })) });
   }
 }

@@ -169,7 +169,7 @@ export class BattleRoom extends DurableObject {
     const players = this.game.humans;   // CPU players don't count: they leave when people arrive
     this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode }),
+      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode, size: this.game.rules.size }),
     }).catch(() => {});
   }
 

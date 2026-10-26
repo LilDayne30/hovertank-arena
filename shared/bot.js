@@ -3,7 +3,7 @@
 // (same speed, same shells, same cooldown). Only its decisions come from code.
 import { C, DT, heightAt, solveAim, wrapPi, clamp } from './sim.js';
 import { PIT_HALF, HEAL_POS } from './arena.js';
-import { ITEMS, SLOTS, DEFAULT_LOOK } from './progress.js';
+import { ITEMS, SLOTS, DEFAULT_LOOK, owned } from './progress.js';
 
 // strength presets: aimErr = spread of the aim point in metres (grows with range), reaction time, turret turn speed, how eagerly it shoots, etc.
 export const BOT_LEVELS = {
@@ -11,21 +11,37 @@ export const BOT_LEVELS = {
   normal: { name: 'ふつう', aimErr: 2.1, react: 0.5, turn: 4.0, fire: 0.3, range: 58, lead: 0.6, pref: 26, drift: 1, dodge: 0.3, jumpRand: 0.06, heal: 40 },
   hard:   { name: 'つよい', aimErr: 1.3, react: 0.25, turn: 7.0, fire: 0.7, range: 75, lead: 0.95, pref: 22, drift: 2, dodge: 0.65, jumpRand: 0.08, heal: 50 },
 };
-export const BOT_NAMES = ['レイ', 'ガロ', 'ミナ', 'ジン', 'ルカ', 'ソラ', 'ハク', 'ユズ'];   // shown with a CPU badge
+export const BOT_NAMES = ['レイ', 'ガロ', 'ミナ', 'ジン', 'ルカ', 'ソラ', 'ハク', 'ユズ'];   // private rooms (shown with a CPU badge)
+// quick-match rooms: ordinary-looking player names
+export const QM_NAMES = ['たける', 'Kaito', 'ゆうと', 'Mika', 'ShadowFox', 'りん', 'Hayate', 'なぎ', 'Sora_7', 'こはる', 'Ryu', 'みなと', 'Nova', 'ゆい', 'Ken', 'あおい',
+  'ToraX', 'はると', 'Luna', 'そうた', 'Blitz', 'ひなた', 'Jet', 'さくら', 'Zero', 'こうき', 'Mint', 'いつき', 'Raven', 'めい'];
+
+// a continuous strength 0 (easy) .. 0.5 (normal) .. 1 (hard): parameters interpolated between the presets
+export const PRESET_SKILL = { easy: 0, normal: 0.5, hard: 1 };
+export function botParams(skill) {
+  const k = clamp(skill, 0, 1), [a, b, f] = k <= 0.5 ? [BOT_LEVELS.easy, BOT_LEVELS.normal, k / 0.5] : [BOT_LEVELS.normal, BOT_LEVELS.hard, (k - 0.5) / 0.5];
+  const out = {};
+  for (const key of Object.keys(a)) out[key] = typeof a[key] === 'number' ? a[key] + (b[key] - a[key]) * f : a[key];
+  out.drift = Math.round(out.drift);
+  return out;
+}
+// quick match: strength follows the players' level (Lv1 ~ easy, Lv30 ~ normal, Lv50 ~ hard)
+export const skillForLevel = (lv) => 0.05 + 0.85 * ((clamp(lv || 1, 1, 50) - 1) / 49) ** 0.8;
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) / 0.5;   // ~N(0,1), bounded
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// a random outfit: shows players what can be unlocked
-export function randomLook() {
+// a random outfit; with a level, only items a player of that level could have unlocked
+export function randomLook(level) {
   const look = { ...DEFAULT_LOOK };
+  const have = level ? owned(level, {}) : null;
   for (const s of SLOTS) {
-    if (s.k === 'title' || s.k === 'frame') continue;
-    const opts = ITEMS.filter((i) => i.slot === s.k);
-    if (Math.random() < 0.6) look[s.k] = pick(opts).id;
+    if (s.k === 'title') continue;
+    const opts = ITEMS.filter((i) => i.slot === s.k && (!have || have.has(i.key)));
+    if (opts.length && Math.random() < 0.6) look[s.k] = pick(opts).id;
   }
-  look.paint = 'auto';   // keep the seat colour so players can tell bots apart in the list
+  if (!level || Math.random() < 0.5) look.paint = 'auto';
   return look;
 }
 
@@ -50,9 +66,10 @@ function freeDir(w, x, z, a, dist) {
 }
 
 export class BotBrain {
+  // level: 'easy' | 'normal' | 'hard', or a number 0..1 (continuous strength)
   constructor(level = 'normal') {
-    this.level = BOT_LEVELS[level] ? level : 'normal';
-    this.p = BOT_LEVELS[this.level];
+    this.level = typeof level === 'number' ? level : BOT_LEVELS[level] ? level : 'normal';
+    this.setSkill(typeof level === 'number' ? level : PRESET_SKILL[this.level]);
     this.seq = 0;
     this.time = 0;
     this.target = null; this.retarget = 0;
@@ -64,6 +81,7 @@ export class BotBrain {
     this.driftUntil = 0; this.driftCool = rnd(2, 4);
     this.seenFor = 0;
   }
+  setSkill(skill) { this.skill = clamp(skill, 0, 1); this.p = botParams(this.skill); }
 
   // me: the bot's player record; game: the Game (players, shells, heal, world, teamMode)
   think(me, game) {
@@ -120,7 +138,7 @@ export class BotBrain {
     const shieldUp = this.target && game.time < this.target.invulnUntil;
     if (tgt && this.vis && aligned && dist < P.range && !shieldUp && this.seenFor > P.react * 0.5 && t.cooldown <= 0 && Math.random() < P.fire) inp.f = true;
     // fresh spawn: wait for the shield to run out before shooting (shooting ends it)
-    if (game.time < me.invulnUntil && game.time < me.invulnUntil - 0.3 && this.level !== 'hard') inp.f = false;
+    if (game.time < me.invulnUntil && game.time < me.invulnUntil - 0.3 && this.skill < 0.8) inp.f = false;
 
     // ------------------------------------------------ where to go
     let goal = null, mode = 'roam';

@@ -3,7 +3,7 @@ import { Room, createRoom, roomInfo, quickMatch, stats as fetchStats } from './n
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim,
 } from '../shared/sim.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel, qmLabel } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -68,12 +68,18 @@ async function init() {
   $('btn-create').dataset.rules = '';
   $('btn-create').onclick = () => start('create', null, lobbyRules.get());
   // quick match (public rooms) with a mode preference
-  let qmMode = store.get('ht-qm') || 'any';
-  const paintQm = () => document.querySelectorAll('#qm-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === qmMode)));
-  document.querySelectorAll('#qm-mode button').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
+  // quick match: mode + how many tanks fight (team battle is always 2 v 2)
+  let qmMode = store.get('ht-qm') || 'any', qmSize = Number(store.get('ht-qm-size')) || 4;
+  const paintQm = () => {
+    document.querySelectorAll('#qm-mode [data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === qmMode)));
+    const size = qmMode === 'team' ? 4 : qmSize;
+    document.querySelectorAll('#qm-size button').forEach((b) => { b.setAttribute('aria-pressed', String(Number(b.dataset.n) === size)); b.disabled = qmMode === 'team' && b.dataset.n !== '4'; });
+  };
+  document.querySelectorAll('#qm-mode [data-v]').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
+  document.querySelectorAll('#qm-size button').forEach((b) => { b.onclick = () => { qmSize = Number(b.dataset.n); store.set('ht-qm-size', String(qmSize)); if (qmMode === 'team' && qmSize !== 4) qmMode = 'ffa'; paintQm(); }; });
   paintQm();
-  $('btn-quick').onclick = () => start('quick', null, null, qmMode);
-  if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
+  $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize);
+  if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
   setupSound();
@@ -255,7 +261,7 @@ function showLoading(on, text) { $('loading').classList.toggle('hidden', !on); i
 function banner(text) { $('banner').textContent = text || ''; $('banner').classList.toggle('hidden', !text); }
 
 // ------------------------------------------------------------------ networking
-async function start(mode, rid, newRules, qmMode) {
+async function start(mode, rid, newRules, qmMode, qmSize = 4) {
   const name = $('name').value.trim().slice(0, 12);
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
@@ -267,7 +273,7 @@ async function start(mode, rid, newRules, qmMode) {
       const tried = [];
       for (let attempt = 0; attempt < 4; attempt++) {
         showLoading(true, attempt ? '別の部屋を探しています…' : '対戦相手を探しています…');
-        id = await quickMatch(ENDPOINT, qmMode, tried);
+        id = await quickMatch(ENDPOINT, qmMode, tried, qmSize);
         room = new Room(ENDPOINT, id);
         bindRoom(room);
         try { await room.connect(name, null); break; } catch (e) { room = null; tried.push(id); if (e.code !== 'full' || attempt === 3) throw e; }
@@ -367,7 +373,7 @@ function onSnapshot(m) {
     if (e.t === 'team' && e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が${TEAM_NAMES[e.team]}に移動`);
     if (e.t === 'newgame') {
       sound.horn();
-      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました（${rulesLabel(e.rules || rules)}）`);
+      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました（${publicRoom ? qmLabel(e.rules || rules) : rulesLabel(e.rules || rules)}）`);
       $('result').classList.add('hidden'); $('settings').classList.add('hidden');
       local.spawnId = -1;
     }
@@ -969,7 +975,7 @@ function updateBoard() {
       return `<div class="team-h" style="color:${rgb(TEAM_COLORS[t])}">${TEAM_NAMES[t]} <b>${teamKills[t]}</b>${t === myTeam ? '（味方）' : ''}</div>${members.map(row).join('') || '<div class="off">―</div>'}`;
     }).join('');
   } else html = [...roster.values()].sort(byKills).map(row).join('');
-  html = `<div class="rules-h">${publicRoom ? 'クイックマッチ・' : ''}${rulesLabel(rules)}</div>${html}`;
+  html = `<div class="rules-h">${publicRoom ? `クイックマッチ・${qmLabel(rules)}` : rulesLabel(rules)}</div>${html}`;
   if ($('board').innerHTML !== html) $('board').innerHTML = html;
 }
 // HUD text for team colours is lightened so it stays readable on the bright desert

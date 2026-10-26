@@ -11,8 +11,8 @@ export async function createRoom(base, rules) {
 }
 
 // quick match: returns the id of a public room with a free seat (created on demand)
-export async function quickMatch(base, mode, exclude = []) {
-  const r = await fetch(`${base}/api/quickmatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, exclude }) });
+export async function quickMatch(base, mode, exclude = [], size = 4) {
+  const r = await fetch(`${base}/api/quickmatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, size, exclude }) });
   if (!r.ok) throw new RoomError('match_failed', `マッチングに失敗しました (${r.status})`);
   return (await r.json()).id;
 }

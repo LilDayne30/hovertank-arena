@@ -28,7 +28,7 @@ export default {
     // quick match: the matchmaker picks (or creates) a public room with a free seat
     if (url.pathname === '/api/quickmatch' && request.method === 'POST') {
       const body = await request.json().catch(() => ({}));
-      return matchmaker(env).fetch('https://mm/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: body.mode, exclude: body.exclude }) });
+      return matchmaker(env).fetch('https://mm/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: body.mode, size: body.size, exclude: body.exclude }) });
     }
     if (url.pathname === '/api/stats') return matchmaker(env).fetch('https://mm/stats');
     if (url.pathname.startsWith('/api/profile')) return profileApi(request, env, url.pathname.slice('/api/profile'.length));
