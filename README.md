@@ -12,7 +12,10 @@
 
 ## 遊び方
 
-1. 公開URLを開き、ルール（下記）を選んで「部屋を作る」を押す
+- **クイックマッチ**：「クイックマッチ」を押すと、空きのある公開ルームに自動で入ります（人数の多い部屋から順に埋め、空きがなければ新しい部屋を作る）。希望は「どちらでも／個人戦／チーム戦」。公開ルームのルールは5分間で固定です。入った後でも「招待」ボタンで友達を同じ部屋に呼べます。
+- **友達と遊ぶ（招待URLの部屋）**：
+
+1. 公開URLを開き、ルール（下記）を選んで「部屋を作る」を押す。この部屋はクイックマッチには出てきません
 2. 表示された招待URL（`?r=部屋コード`）を相手に送る。相手は開いて「この部屋に参加」を押す
 3. 勝敗がつくと結果を10秒表示し、同じルールで次の試合が自動で始まる
 
@@ -58,6 +61,7 @@ npm run dev        # ビルドしてから wrangler dev を起動 → http://loc
 
 ```bash
 npm run dev                                   # 別ターミナルで起動しておく
+node test/quickmatch.mjs                      # クイックマッチ：部屋の詰め方・満室で次の部屋・希望モード・招待部屋は対象外・同時8人でもあふれない（要サーバー）
 npm run test:bots                             # 4つのWebSocketクライアントで同期・命中・満室・存在しない部屋・再接続・無敵解除を確認
 node test/sim-drift.mjs                       # ドリフト・ターボの溜まり方と加速を確認（サーバー不要）
 node test/sim-hill.mjs                        # 中央の丘に24方向すべてから登れることを確認（サーバー不要）
@@ -98,7 +102,7 @@ npx wrangler dev --var MATCH_SECONDS:8        # 試合時間を短くして、�
 
 ```
 client/   画面（PlayCanvas）。main.js＝描画・予測・補間・HUD、input.js＝キーボード／マウス／タッチ、net.js＝通信、fx.js＝エフェクト、stage.js＝遮蔽物の見た目
-worker/   Cloudflare Worker（index.js＝静的ファイル配信と部屋の振り分け）と Durable Object（room.js＝接続・席・30Hzループ）
+worker/   Cloudflare Worker（index.js＝静的ファイル配信と部屋の振り分け）と Durable Object（room.js＝接続・席・30Hzループ、matchmaker.js＝クイックマッチ用の公開ルーム一覧）
 shared/   クライアントとサーバーで共通のコード。sim.js＝移動・砲弾・ドリフト、game.js＝試合ルール、arena.js＝スポーン位置と遮蔽物の配置
 public/   配信する素材（GLB、当たり判定用の高さマップ）とクレジットページ
 tools/    元の .blend から素材を作り直すスクリプト（Blender の Python モジュール bpy を使用）

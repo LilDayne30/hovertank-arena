@@ -44,15 +44,23 @@
   </div>
 
   <!-- panels -->
-  <div id="lobby" class="panel">
+  <div id="lobby" class="panel scrollable">
     <h1>HOVER TANK <span>ARENA</span></h1>
     <p class="sub">滑って、撃って、跳べ。最大4人のオンライン対戦</p>
     <label>名前 <input id="name" maxlength="12" autocomplete="off" placeholder="Player" /></label>
+    <div class="lobby-sec">
+      <button id="btn-quick" type="button" class="big">クイックマッチ</button>
+      <div id="qm-mode" class="rules"><div class="row"><span class="lbl">希望</span><button data-v="any" type="button">どちらでも</button><button data-v="ffa" type="button">個人戦</button><button data-v="team" type="button">チーム戦</button></div></div>
+      <p id="qm-stats"></p>
+    </div>
+    <div class="lobby-sec">
+      <div class="sec-h">友達と遊ぶ（招待URLの部屋）</div>
     <div id="lobby-rules" class="rules"></div>
     <p id="lobby-room-rules"></p>
     <div id="lobby-actions">
       <button id="btn-create" type="button">部屋を作る</button>
       <button id="btn-join" type="button" class="hidden">この部屋に参加</button>
+    </div>
     </div>
     <p id="lobby-status"></p>
     <a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット・ライセンス</a>
@@ -65,19 +73,20 @@
     <div class="row"><button id="btn-copy" type="button">コピー</button><button id="btn-share" type="button">共有</button><button id="btn-invite-close" type="button">閉じる</button></div>
   </div>
 
-  <div id="settings" class="panel hidden">
+  <div id="settings" class="panel scrollable hidden">
     <h2>設定</h2>
     <div class="row" id="quality-row">
       画質 <button data-q="low" type="button">低</button><button data-q="mid" type="button">中</button><button data-q="high" type="button">高</button>
     </div>
     <label class="row">感度 <input id="sens" type="range" min="0.4" max="2.0" step="0.1" value="1" /></label>
     <div id="settings-rules" class="rules"></div>
+    <p id="public-note" class="note hidden">クイックマッチの部屋はルール固定です（個人戦／チーム戦ごとに相手を探すため）。</p>
     <div class="row"><button id="btn-newgame" type="button">このルールでニューゲーム</button><button id="btn-team" type="button" class="hidden">チームを変える</button></div>
     <p class="note">ニューゲームは全員のスコアと試合をリセットして最初からやり直します（2回押し）。</p>
     <div class="row"><button id="btn-fullscreen" type="button">全画面</button><button id="btn-leave" type="button">退出</button><button id="btn-settings-close" type="button">閉じる</button></div>
   </div>
 
-  <div id="result" class="panel hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><p id="result-next"></p><div class="row"><button id="btn-result-newgame" type="button">すぐに次の試合へ</button></div></div>
+  <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><p id="result-next"></p><div class="row"><button id="btn-result-newgame" type="button">すぐに次の試合へ</button></div></div>
   <div id="banner" class="hidden"></div>
   <div id="rotate">端末を横向きにしてください</div>
   <div id="loading" class="hidden"><div class="spinner"></div><p id="loading-text">読み込み中…</p></div>

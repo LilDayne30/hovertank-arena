@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { Room, createRoom, roomInfo } from './net.js';
+import { Room, createRoom, roomInfo, quickMatch, stats as fetchStats } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
 } from '../shared/sim.js';
@@ -42,7 +42,7 @@ let ping = 0, fpsSmooth = 60;
 const stats = { corrections: 0, bigCorrections: 0 };
 const mats = {};
 const heal = { active: false, next: 0, e: null, tag: null };
-let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null;
+let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null, publicRoom = false;
 const sameTeam = (id) => rules.mode === 'team' && roster.get(id)?.team === myTeam;
 window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
 
@@ -58,6 +58,14 @@ async function init() {
   const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
   $('btn-create').dataset.rules = '';
   $('btn-create').onclick = () => start('create', null, lobbyRules.get());
+  // quick match (public rooms) with a mode preference
+  let qmMode = store.get('ht-qm') || 'any';
+  const paintQm = () => document.querySelectorAll('#qm-mode button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === qmMode)));
+  document.querySelectorAll('#qm-mode button').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
+  paintQm();
+  $('btn-quick').onclick = () => start('quick', null, null, qmMode);
+  const showStats = () => fetchStats(ENDPOINT).then((st) => { if (st) $('qm-stats').textContent = st.players ? `いま ${st.players} 人がクイックマッチで遊んでいます` : 'いまクイックマッチで遊んでいる人はいません（最初の1人になります）'; }).catch(() => {});
+  showStats(); setInterval(() => { if (!room) showStats(); }, 15000);
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
@@ -159,7 +167,9 @@ function setSens(v) { if (input) { input.mouseSens = 0.0025 * v; input.touchSens
 function wireUi() {
   document.querySelectorAll('#quality-row button').forEach((b) => { b.onclick = () => applyQuality(b.dataset.q); });
   $('sens').oninput = (e) => setSens(parseFloat(e.target.value));
-  $('btn-settings').onclick = () => { document.exitPointerLock?.(); settingsRules.set(rules); $('btn-team').classList.toggle('hidden', rules.mode !== 'team'); $('settings').classList.remove('hidden'); };
+  $('btn-settings').onclick = () => { document.exitPointerLock?.(); settingsRules.set(rules); $('btn-team').classList.toggle('hidden', rules.mode !== 'team');
+    $('settings-rules').classList.toggle('hidden', publicRoom); $('public-note').classList.toggle('hidden', !publicRoom);
+    $('btn-newgame').textContent = $('btn-newgame').dataset.label = publicRoom ? 'ニューゲーム' : 'このルールでニューゲーム'; $('settings').classList.remove('hidden'); };
   $('btn-settings-close').onclick = () => $('settings').classList.add('hidden');
   $('btn-invite').onclick = () => { document.exitPointerLock?.(); showInvite(); };
   $('btn-invite-close').onclick = () => $('invite').classList.add('hidden');
@@ -195,23 +205,35 @@ function showLoading(on, text) { $('loading').classList.toggle('hidden', !on); i
 function banner(text) { $('banner').textContent = text || ''; $('banner').classList.toggle('hidden', !text); }
 
 // ------------------------------------------------------------------ networking
-async function start(mode, rid, newRules) {
+async function start(mode, rid, newRules, qmMode) {
   const name = $('name').value.trim().slice(0, 12);
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
   showLoading(true, 'サーバーに接続中…');
   try {
     let id = rid;
-    if (mode === 'create') id = await createRoom(ENDPOINT, newRules);
+    if (mode === 'quick') {
+      // a seat can be taken by someone else between matching and joining: try another room then
+      const tried = [];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        showLoading(true, attempt ? '別の部屋を探しています…' : '対戦相手を探しています…');
+        id = await quickMatch(ENDPOINT, qmMode, tried);
+        room = new Room(ENDPOINT, id);
+        bindRoom(room);
+        try { await room.connect(name, null); break; } catch (e) { room = null; tried.push(id); if (e.code !== 'full' || attempt === 3) throw e; }
+      }
+    } else if (mode === 'create') id = await createRoom(ENDPOINT, newRules);
     else {
       const info = await roomInfo(ENDPOINT, id);
       if (!info.exists) throw Object.assign(new Error('notfound'), { code: 'notfound' });
       if (info.full && mode !== 'reconnect') throw Object.assign(new Error('full'), { code: 'full' });
     }
-    room = new Room(ENDPOINT, id);
-    bindRoom(room);
-    const token = mode === 'reconnect' ? store.sget(`ht-token-${id}`) : null;
-    await room.connect(name, token);   // with a valid token the server gives back the same seat
+    if (mode !== 'quick') {
+      room = new Room(ENDPOINT, id);
+      bindRoom(room);
+      const token = mode === 'reconnect' ? store.sget(`ht-token-${id}`) : null;
+      await room.connect(name, token);   // with a valid token the server gives back the same seat
+    }
   } catch (e) {
     showLoading(false);
     const code = e?.code || '';
@@ -229,12 +251,13 @@ async function start(mode, rid, newRules) {
   document.body.classList.add('playing');
   input.enabled = true;
   if (mode === 'create') showInvite();
+  if (mode === 'quick') notice(publicRoom && roster.size <= 1 ? 'クイックマッチ：対戦相手を待っています（招待URLで友達も呼べます）' : 'クイックマッチ：対戦に参加しました');
   if (!input.touchMode) $('center-msg').textContent = 'クリックで操作開始';
   setInterval(() => room?.send('ping', performance.now()), 2000);
 }
 
 function bindRoom(r) {
-  r.onMessage('welcome', (m) => { myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+  r.onMessage('welcome', (m) => { myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
@@ -860,7 +883,7 @@ function updateBoard() {
       return `<div class="team-h" style="color:${rgb(TEAM_COLORS[t])}">${TEAM_NAMES[t]} <b>${teamKills[t]}</b>${t === myTeam ? '（味方）' : ''}</div>${members.map(row).join('') || '<div class="off">―</div>'}`;
     }).join('');
   } else html = [...roster.values()].sort(byKills).map(row).join('');
-  html = `<div class="rules-h">${rulesLabel(rules)}</div>${html}`;
+  html = `<div class="rules-h">${publicRoom ? 'クイックマッチ・' : ''}${rulesLabel(rules)}</div>${html}`;
   if ($('board').innerHTML !== html) $('board').innerHTML = html;
 }
 // HUD text for team colours is lightened so it stays readable on the bright desert

@@ -129,3 +129,10 @@ body.touch #teamscore { top: 56px; } body.touch #teamscore:not(.hidden) ~ #heal-
 .tag.ally span { text-decoration: underline; }
 #result-title small { display: block; font-size: 13px; opacity: .8; margin-top: 4px; }
 #result-teams { font-size: 18px; margin: 0; }
+
+/* lobby sections */
+.lobby-sec { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.12); }
+.lobby-sec .sec-h { font-size: 13px; opacity: .85; }
+button.big { width: 100%; font-size: 18px; padding: 12px; }
+#qm-stats { font-size: 12px; opacity: .8; margin: 6px 0 0; min-height: 1.2em; }
+#lobby-actions { margin-top: 8px; }

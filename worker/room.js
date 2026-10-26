@@ -37,21 +37,23 @@ export class BattleRoom extends DurableObject {
       this.created = !!(await this.ctx.storage.get('created'));
       const saved = await this.ctx.storage.get('rules');
       if (saved && this.game.size === 0) this.game.setRules(saved);
+      this.public = !!(await this.ctx.storage.get('public'));
     }
 
     if (url.pathname === '/init') {
-      let rules = null;
-      try { rules = (await request.json())?.rules ?? null; } catch { /* default rules */ }
+      let rules = null, isPublic = false;
+      try { const b = await request.json(); rules = b?.rules ?? null; isPublic = !!b?.public; } catch { /* default rules */ }
       rules = cleanRules(rules);
       this.game.setRules(rules);
-      await this.ctx.storage.put({ created: true, rules });
+      this.public = isPublic;
+      await this.ctx.storage.put({ created: true, rules, public: isPublic });
       this.created = true;
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
       return json({ ok: true });
     }
     if (url.pathname === '/info') {
       if (!this.created) return json({ exists: false }, 404);
-      return json({ exists: true, players: this.game.size, max: MAX_PLAYERS, full: this.game.isFull(), rules: this.game.rules });
+      return json({ exists: true, players: this.game.size, max: MAX_PLAYERS, full: this.game.isFull(), rules: this.game.rules, public: !!this.public });
     }
     if (url.pathname === '/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
@@ -94,7 +96,8 @@ export class BattleRoom extends DurableObject {
     this.sockets.set(id, ws);
     this.startLoop();
     this.ctx.storage.deleteAlarm();
-    ws.send(JSON.stringify(['welcome', this.game.welcome(id, { token: myToken, roomId: this.roomId, reconnected })]));
+    ws.send(JSON.stringify(['welcome', this.game.welcome(id, { token: myToken, roomId: this.roomId, reconnected, public: !!this.public })]));
+    if (!reconnected) this.report();
     this.game.sendRoster();
 
     ws.addEventListener('message', (ev) => {
@@ -105,7 +108,12 @@ export class BattleRoom extends DurableObject {
       if (type === 'i') this.game.onInput(id, data);
       else if (type === 'ping') ws.send(JSON.stringify(['pong', data]));
       else if (type === 'name') this.game.onName(id, data);
-      else if (type === 'newgame') { this.game.onNewGame(id, data && typeof data === 'object' ? data.rules : null); this.ctx.storage.put('rules', this.game.rules); }
+      else if (type === 'newgame') {
+        // quick-match rooms keep their rules (the matchmaker sorts players by them); new game just restarts
+        const rules = !this.public && data && typeof data === 'object' ? data.rules : null;
+        this.game.onNewGame(id, rules);
+        this.ctx.storage.put('rules', this.game.rules);
+      }
       else if (type === 'team') this.game.onSwitchTeam(id);
       else if (type === 'leave') this.drop(id, ws, true);
     });
@@ -122,10 +130,21 @@ export class BattleRoom extends DurableObject {
     this.holds.set(id, setTimeout(() => this.forget(id), RECONNECT_SECONDS * 1000));
   }
 
+  // tell the matchmaker how many players this public room has (0 = remove it from the list)
+  report() {
+    if (!this.public || !this.env.MATCH) return;
+    const players = this.game.size;
+    this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode }),
+    }).catch(() => {});
+  }
+
   forget(id) {
     clearTimeout(this.holds.get(id)); this.holds.delete(id);
     for (const [t, pid] of this.tokens) if (pid === id) this.tokens.delete(t);
     this.game.removePlayer(id);
+    this.report();
     if (this.game.size === 0) {
       clearInterval(this.loop); this.loop = null;
       this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
@@ -134,8 +153,9 @@ export class BattleRoom extends DurableObject {
 
   startLoop() {
     if (this.loop) return;
-    let last = Date.now();
+    let last = Date.now(), lastReport = Date.now();
     this.loop = setInterval(() => {
+      if (Date.now() - lastReport > 60000) { lastReport = Date.now(); this.report(); }   // heartbeat for the matchmaker
       const now = Date.now();
       this.game.update((now - last) / 1000);
       last = now;
