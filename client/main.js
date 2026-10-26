@@ -1,7 +1,7 @@
 import * as pc from 'playcanvas';
 import { Room, createRoom, roomInfo, quickMatch, stats as fetchStats } from './net.js';
 import {
-  C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp,
+  C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim,
 } from '../shared/sim.js';
 import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel } from '../shared/arena.js';
 import { Input } from './input.js';
@@ -12,6 +12,7 @@ import { Looks, emblemSvg } from './looks.js';
 import { Profile } from './profile.js';
 import { setupProgressUi, titleName } from './progress-ui.js';
 import { DEFAULT_LOOK } from '../shared/progress.js';
+import { Sound } from './audio.js';
 
 // ------------------------------------------------------------------ config
 const ENDPOINT = location.origin;   // the Worker serves both the page and /api
@@ -30,7 +31,9 @@ const store = {
 
 // ------------------------------------------------------------------ globals
 let app, device, world, tankAsset, camera, root, fx, looks, profile, pui;
-const preview = { look: null, yaw: 0.6, v: null };   // garage preview (lobby: its own tank on the hill; in a room: your tank)
+const preview = { look: null, yaw: 0.6, v: null };
+const sound = new Sound();
+let lastCharge = 0;   // garage preview (lobby: its own tank on the hill; in a room: your tank)
 let input;
 let room = null, myId = null, mySlot = 0, phase = 'play';
 const roster = new Map();         // id -> {name, slot, connected}
@@ -73,6 +76,7 @@ async function init() {
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
+  setupSound();
   profile = new Profile(ENDPOINT);
   pui = setupProgressUi({
     profile,
@@ -228,6 +232,21 @@ function wireUi() {
   $('btn-leave').onclick = async () => { if (room) { store.sdel(`ht-token-${room.roomId}`); await room.leave(); } location.href = location.pathname; };
 }
 
+// ------------------------------------------------------------------ sound settings
+function setupSound() {
+  const unlock = () => { sound.unlock(); if (!room) sound.setMusic('lobby'); };
+  for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, unlock, { capture: true });
+  const bgm = parseFloat(store.get('ht-bgm') ?? '0.55'), sfx = parseFloat(store.get('ht-sfx') ?? '0.9');
+  sound.setVolume('bgm', bgm); sound.setVolume('sfx', sfx);
+  $('vol-bgm').value = String(bgm); $('vol-sfx').value = String(sfx);
+  $('vol-bgm').oninput = (e) => { sound.setVolume('bgm', +e.target.value); store.set('ht-bgm', e.target.value); };
+  $('vol-sfx').oninput = (e) => { sound.setVolume('sfx', +e.target.value); store.set('ht-sfx', e.target.value); };
+  const paintMute = () => document.querySelectorAll('.btn-mute').forEach((b) => { b.textContent = sound.muted ? '🔇' : '🔊'; b.setAttribute('aria-pressed', String(sound.muted)); });
+  sound.setMuted(store.get('ht-mute') === '1'); paintMute();
+  document.querySelectorAll('.btn-mute').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); sound.unlock(); sound.setMuted(!sound.muted); store.set('ht-mute', sound.muted ? '1' : '0'); paintMute(); }; });
+  document.addEventListener('click', (e) => { if (e.target.closest?.('button') && !e.target.closest('.btn-mute')) sound.click(); });
+}
+
 function showInvite() {
   $('invite-url').value = `${location.origin}${location.pathname}?r=${room.roomId}`;
   $('invite').classList.remove('hidden');
@@ -305,7 +324,7 @@ function bindRoom(r) {
   });
   r.onMessage('s', onSnapshot);
   r.onMessage('result', showResult);
-  r.onMessage('prog', (res) => { if (DEBUG) (window.__ht.progs ??= []).push(res); profile.applyProgress(res); pui.showMatchProgress(res); });
+  r.onMessage('prog', (res) => { if (DEBUG) (window.__ht.progs ??= []).push(res); profile.applyProgress(res); pui.showMatchProgress(res); if (res?.after && res.before && res.after.level > res.before.level) setTimeout(() => sound.levelUp(), 900); });
   r.onMessage('pong', (t) => { ping = ping ? ping * 0.7 + (performance.now() - t) * 0.3 : performance.now() - t; });
   r.onDrop(() => { banner('接続が切れました。再接続中…'); input.reset(); });
   r.onReconnect(() => { banner(''); store.sset(`ht-token-${r.roomId}`, r.reconnectionToken); local.spawnId = -1; });
@@ -343,10 +362,11 @@ function onSnapshot(m) {
   if (serverTick === null || Math.abs(serverTick - s.k) > 15) serverTick = s.k;
   else serverTick += (s.k - serverTick) * 0.08;
   for (const e of m.e) {
-    if (e.t === 'hit' && e.o === myId) flashHitmark();
-    if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); }
+    if (e.t === 'hit' && e.o === myId) { flashHitmark(); sound.hitConfirm(); }
+    if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); sound.hurt(); }
     if (e.t === 'team' && e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が${TEAM_NAMES[e.team]}に移動`);
     if (e.t === 'newgame') {
+      sound.horn();
       notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました（${rulesLabel(e.rules || rules)}）`);
       $('result').classList.add('hidden'); $('settings').classList.add('hidden');
       local.spawnId = -1;
@@ -355,7 +375,8 @@ function onSnapshot(m) {
     if (e.t === 'heal' && e.v === myId) { centerFlash('全回復！', 1000, true); flashHeal(); }
     pendingEvents.push({ k: s.k, e });
   }
-  if (phase !== s.ph) { phase = s.ph; if (phase === 'play') $('result').classList.add('hidden'); }
+  if (phase !== s.ph) { phase = s.ph; if (phase === 'play') { $('result').classList.add('hidden'); sound.horn(); } }
+  sound.setMusic(phase === 'play' ? 'battle' : 'result', phase === 'play' && rules.goal === 'time' && s.tl <= 30);
   teamKills = m.tk || [0, 0];
   $('timer').textContent = rules.goal === 'kills' ? `${rules.target}キル先取` : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
   $('teamscore').classList.toggle('hidden', rules.mode !== 'team');
@@ -409,6 +430,7 @@ function update(dt) {
   fpsSmooth = fpsSmooth * 0.95 + (1 / Math.max(dt, 1e-4)) * 0.05;
   if (!room || !myId) {
     if (preview.look && looks) garagePreview(dt); else { if (tanks.has('__preview')) removeTank('__preview'); lobbyCamera(dt); }
+    sound.engine({ alive: false });
     fx.update(dt); return;
   }
 
@@ -436,6 +458,10 @@ function update(dt) {
   fx.update(dt);
   updateTags();
   updateHud(dt);
+  const cp = camera.getPosition();
+  sound.setListener(cp.x, cp.y, cp.z, camYaw);
+  const lt = local.t;
+  sound.engine({ alive: local.alive && !!lt, inGame: phase === 'play' || phase === 'end', speed: lt ? Math.hypot(lt.vx, lt.vz) : 0, boost: lt?.boost || 0, sliding: local.sliding, charge: lt?.charge || 0 });
 }
 
 function tick() {
@@ -452,9 +478,12 @@ function tick() {
     const ev = stepTank(t, inp, world);
     const gy = t.y - C.hoverHeight;
     if (ev.fired) { fireLocalShell(t); fx.addShake(0.07); }
-    if (ev.landed) fx.landRing(t.x, gy, t.z, 1);
-    if (ev.jumped) fx.jumpRing(t.x, gy, t.z);
-    if (ev.boost) { fx.boostBurst(t.x, gy, t.z, t.yaw, ev.boost); fovKick = ev.boost === 2 ? 14 : 9; fx.addShake(0.15 * ev.boost); }
+    if (ev.landed) { fx.landRing(t.x, gy, t.z, 1); sound.land(null, true); }
+    if (ev.jumped) { fx.jumpRing(t.x, gy, t.z); sound.jump(null, true); }
+    if (ev.boost) { fx.boostBurst(t.x, gy, t.z, t.yaw, ev.boost); fovKick = ev.boost === 2 ? 14 : 9; fx.addShake(0.15 * ev.boost); sound.boost(null, true, ev.boost); }
+    const lvl = t.charge >= C.charge2 ? 2 : t.charge >= C.charge1 ? 1 : 0;
+    if (lvl > lastCharge) sound.chargeTing(lvl);
+    lastCharge = lvl;
     local.sliding = ev.sliding;
   }
   local.pending.push(inp);
@@ -464,21 +493,6 @@ function tick() {
 }
 let outBuf = [];
 const r3 = (v) => Math.round(v * 1000) / 1000;
-
-// aim the barrel at whatever is under the crosshair (with gravity compensation)
-function solveAim(t, target) {
-  const bx = t.x, by = t.y + C.muzzleUp, bz = t.z;
-  const dx = target.x - bx, dz = target.z - bz;
-  const ay = Math.atan2(-dx, -dz);
-  const d = Math.max(1, Math.hypot(dx, dz) - C.muzzleForward);
-  const v = C.shellSpeed, g = C.shellGravity;
-  const yAt = (th) => { const tt = d / (v * Math.cos(th)); return by + C.muzzleForward * Math.sin(th) + (v * Math.sin(th) + 2) * tt - 0.5 * g * tt * tt; };
-  let lo = C.aimPitchMin, hi = C.aimPitchMax;
-  if (yAt(hi) < target.y) return [ay, hi];
-  if (yAt(lo) > target.y) return [ay, lo];
-  for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (yAt(mid) < target.y) lo = mid; else hi = mid; }
-  return [ay, (lo + hi) / 2];
-}
 
 // ------------------------------------------------------------------ materials
 function makeMaterials() {
@@ -663,7 +677,7 @@ function renderLocal(alpha) {
   const z = pc.math.lerp(a.z, b.z, alpha) + local.offset.z;
   const yaw = a.yaw + wrapPi(b.yaw - a.yaw) * alpha;
   v.boost = b.boost; v.boostLvl = b.boostLvl; v.charge = b.charge; v.drifting = local.sliding; v.invulnLeft = local.invulnLeft;
-  if (v.lastSpawn !== local.spawnId) { v.lastSpawn = local.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[mySlot % 4]); }
+  if (v.lastSpawn !== local.spawnId) { v.lastSpawn = local.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[mySlot % 4]); sound.respawn(null, true); }
   v.hp = local.hp;
   placeTank(v, x, y, z, yaw, camYaw, b.vx, b.vz, true, local.invuln, performance.now() / 1000);
 }
@@ -700,9 +714,10 @@ function renderRemote(rt) {
     v.boost = src.boost; v.boostLvl = src.boostLvl; v.charge = src.charge; v.invulnLeft = src.invulnLeft;
     // derive cosmetic state changes (jump / land / slide / respawn) from the interpolated stream
     if (vis) {
-      if (v.lastSpawn !== pa.spawnId) { v.lastSpawn = pa.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[r.slot % 4]); }
-      else if (v.grounded && !src.grounded) fx.jumpRing(x, y - C.hoverHeight, z);
-      else if (!v.grounded && src.grounded) fx.landRing(x, y - C.hoverHeight, z, 0.8);
+      const sp3 = { x, y, z };
+      if (v.lastSpawn !== pa.spawnId) { v.lastSpawn = pa.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[r.slot % 4]); sound.respawn(sp3); }
+      else if (v.grounded && !src.grounded) { fx.jumpRing(x, y - C.hoverHeight, z); sound.jump(sp3); }
+      else if (!v.grounded && src.grounded) { fx.landRing(x, y - C.hoverHeight, z, 0.8); sound.land(sp3, false, 0.8); }
       const lat = Math.abs(src.vx * Math.cos(yaw) - src.vz * Math.sin(yaw));
       v.drifting = src.drifting && src.grounded && Math.hypot(src.vx, src.vz) > C.driftMinSpeed && lat > C.driftMinSlide;
     }
@@ -723,6 +738,7 @@ function renderRemote(rt) {
       seenShells.add(s.id);
       const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
       fx.muzzle(px, py, pz, s.vx / sp, s.vy / sp, s.vz / sp);
+      sound.fire({ x: px, y: py, z: pz }, false);
       const ov = tanks.get(s.owner); if (ov) ov.recoil = 1;
       if (seenShells.size > 300) seenShells.clear();
     }
@@ -735,23 +751,26 @@ function renderRemote(rt) {
 function flushEvents(rt) {
   while (pendingEvents.length && pendingEvents[0].k <= rt + 0.5) {
     const { e } = pendingEvents.shift();
-    if (e.t === 'boom') { if (e.o !== myId) fx.explosion(e.x, e.y, e.z, 1.6); }
+    if (e.t === 'boom') { if (e.o !== myId) { fx.explosion(e.x, e.y, e.z, 1.6); sound.boom(e, 1); } }
     else if (e.t === 'hit') {
       fx.hitSpark(e.x, e.y, e.z);
+      if (e.v !== myId) sound.boom(e, 1.15);
       const v = tanks.get(e.v); if (v) v.flash = 1;
       if (e.o === myId) killLocalShell(e.q, false);
-    } else if (e.t === 'shield') { fx.shieldSpark(e.x, e.y, e.z); if (e.o === myId) killLocalShell(e.q, false); }
-    else if (e.t === 'healspawn') fx.healSpawn(HEAL_POS.x, HEAL_POS.y, HEAL_POS.z);
+    } else if (e.t === 'shield') { fx.shieldSpark(e.x, e.y, e.z); sound.shield(e); if (e.o === myId) killLocalShell(e.q, false); }
+    else if (e.t === 'healspawn') { fx.healSpawn(HEAL_POS.x, HEAL_POS.y, HEAL_POS.z); sound.healSpawn(); }
     else if (e.t === 'heal') {
       fx.healBurst(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
+      sound.heal(HEAL_POS, e.v === myId);
       const v = tanks.get(e.v); if (v) v.healFlash = 1;
       if (e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が回復した`);
     } else if (e.t === 'boost') {
-      if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); }
+      if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) { fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); sound.boost(v.pos, false, e.l); } }
     } else if (e.t === 'kill') {
       const slot = roster.get(e.v)?.slot ?? 0;
       fx.killStyle(e.x, e.y, e.z, mats.slotLit[slot % 4], roster.get(e.k)?.look?.boom);
       feed(e.k, e.v);
+      sound.kill(e, e.k === myId, e.v === myId);
       if (e.v === myId) centerFlash('撃破された…', 1800);
       else if (e.k === myId) { centerFlash('撃破！', 1200, true); fx.addShake(0.3); }
     }
@@ -900,13 +919,14 @@ function fireLocalShell(t) {
   localShells.push({ seq: t.shotSeq, ...m, px: m.x, py: m.y, pz: m.z, life: C.shellLife, acc: 0 });
   const sp = Math.hypot(m.vx, m.vy, m.vz);
   fx.muzzle(m.x, m.y, m.z, m.vx / sp, m.vy / sp, m.vz / sp);
+  sound.fire(m, true);
   const v = tanks.get(myId); if (v) v.recoil = 1;
 }
 function killLocalShell(q, boom = true) {
   const i = localShells.findIndex((s) => s.seq === q);
   if (i < 0) return;
   const s = localShells[i];
-  if (boom) fx.explosion(s.x, s.y, s.z, 1.6);
+  if (boom) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); }
   const key = `l${s.seq}`; const e = shellEnts.get(key);
   if (e) freeShell(key, e);
   localShells.splice(i, 1);
@@ -919,7 +939,7 @@ function updateLocalShells(dt) {
     while (s.acc >= DT && !dead) {
       s.acc -= DT;
       const { hitGround } = stepShell(s, world);
-      if (hitGround || s.life <= 0) { dead = true; if (hitGround) fx.explosion(s.x, s.y, s.z, 1.6); break; }
+      if (hitGround || s.life <= 0) { dead = true; if (hitGround) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); } break; }
       for (const [id, v] of tanks) {   // visual-only hit; the server decides damage
         if (id === myId || !v.visible || sameTeam(id)) continue;
         if (segmentHitsTank(s, { x: v.pos.x, y: v.pos.y, z: v.pos.z })) { dead = true; break; }
@@ -941,7 +961,7 @@ function updateBoardScores(s) {
 }
 function updateBoard() {
   const byKills = (a, b) => (lastScores.get(b.id) || 0) - (lastScores.get(a.id) || 0);
-  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${r.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r.look?.emblem, 12)}${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
+  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${r.bot ? '<span class="cpu">CPU</span>' : r.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r.look?.emblem, 12)}${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
   let html;
   if (rules.mode === 'team') {
     html = [0, 1].map((t) => {
@@ -966,9 +986,12 @@ function rulesPicker(el, initial, onChange) {
   el.innerHTML = `
     <div class="row"><span class="lbl">モード</span><button data-k="mode" data-v="ffa" type="button">個人戦</button><button data-k="mode" data-v="team" type="button">チーム戦</button></div>
     <div class="row"><span class="lbl">勝利条件</span><button data-k="goal" data-v="time" type="button">5分間で多く倒す</button><button data-k="goal" data-v="kills" type="button">先に</button>
-      <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">キル</span></div>`;
+      <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">キル</span></div>
+    <div class="row"><span class="lbl">CPU</span>${[0, 1, 2, 3].map((n) => `<button data-k="bots" data-v="${n}" type="button">${n ? `${n}体` : 'なし'}</button>`).join('')}</div>
+    <div class="row cpu-lv"><span class="lbl">CPUの強さ</span><button data-k="botLevel" data-v="easy" type="button">よわい</button><button data-k="botLevel" data-v="normal" type="button">ふつう</button><button data-k="botLevel" data-v="hard" type="button">つよい</button></div>`;
   const paint = () => {
-    el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(cur[b.dataset.k] === b.dataset.v)));
+    el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(String(cur[b.dataset.k]) === b.dataset.v)));
+    el.querySelector('.cpu-lv').classList.toggle('dim', !cur.bots);
     const sel = el.querySelector('select'); sel.value = String(cur.target); sel.classList.toggle('dim', cur.goal !== 'kills');
   };
   el.querySelectorAll('button').forEach((b) => { b.onclick = () => { cur = cleanRules({ ...cur, [b.dataset.k]: b.dataset.v }); paint(); onChange(cur); }; });
@@ -1001,10 +1024,11 @@ function showResult(res) {
   const w = res.winner || {};
   const title = w.draw ? '引き分け' : w.team !== undefined ? `${TEAM_NAMES[w.team]}の勝利！` : w.id ? `${escapeHtml(nameOf(w.id))} の勝利！` : '試合終了';
   const mine = w.team !== undefined ? w.team === myTeam : w.id === myId;
+  sound.matchEnd(w.draw ? 'draw' : mine ? 'win' : 'lose');
   $('result-title').innerHTML = title + (w.draw ? '' : mine ? '<small>（あなたの勝ち）</small>' : '');
   $('result-teams').innerHTML = res.teams ? `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${res.teams[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${res.teams[1]} ${TEAM_NAMES[1]}</span>` : '';
   const ol = $('result-list');
-  ol.innerHTML = list.map((p) => { const r = roster.get(p.id); return `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${r?.lv ? `<small>Lv${r.lv}</small> ` : ''}${emblemSvg(r?.look?.emblem, 14)}${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`; }).join('');
+  ol.innerHTML = list.map((p) => { const r = roster.get(p.id); return `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${r?.bot ? '<small class="cpu">CPU</small> ' : r?.lv ? `<small>Lv${r.lv}</small> ` : ''}${emblemSvg(r?.look?.emblem, 14)}${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`; }).join('');
   pui.clearMatchProgress();
   $('result-next').textContent = '10秒後に次の試合が始まります';
   $('result').classList.remove('hidden');
@@ -1051,12 +1075,12 @@ function updateTags() {
     v.tag.style.display = 'block';
     v.tag.style.left = `${tmp.x}px`; v.tag.style.top = `${tmp.y}px`;
     const r = roster.get(id);
-    const tk = `${ally}|${v.name}|${r?.lv}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}`;
+    const tk = `${ally}|${v.name}|${r?.lv}|${r?.bot}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}`;
     if (v.tagKey !== tk) {
       v.tagKey = tk;
       v.tag.className = `tag frame-${r?.look?.frame || 'none'}${ally ? ' ally' : ''}`;
       const ttl = titleName(r?.look?.title);
-      v.tag.firstChild.innerHTML = `${ally ? '▼ ' : ''}${r?.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r?.look?.emblem, 12)}${escapeHtml(v.name || '')}${ttl ? `<span class="ttl">${escapeHtml(ttl)}</span>` : ''}`;
+      v.tag.firstChild.innerHTML = `${ally ? '▼ ' : ''}${r?.bot ? '<span class="cpu">CPU</span>' : r?.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r?.look?.emblem, 12)}${escapeHtml(v.name || '')}${ttl ? `<span class="ttl">${escapeHtml(ttl)}</span>` : ''}`;
       v.tag.firstChild.style.color = colorCss(v.slot);
     }
     v.tag.querySelector('i').style.width = `${v.hp}%`;

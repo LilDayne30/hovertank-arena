@@ -272,6 +272,23 @@ export function muzzle(t) {
   };
 }
 
+// aim yaw/pitch that lands a shell on target {x,y,z} (gravity compensated; used by the client
+// crosshair and by the CPU players)
+export function solveAim(t, target) {
+  const bx = t.x, by = t.y + C.muzzleUp, bz = t.z;
+  const dx = target.x - bx, dz = target.z - bz;
+  const ay = Math.atan2(-dx, -dz);
+  const d = Math.max(1, Math.hypot(dx, dz) - C.muzzleForward);
+  const v = C.shellSpeed, g = C.shellGravity;
+  const yAt = (th) => { const tt = d / (v * Math.cos(th)); return by + C.muzzleForward * Math.sin(th) + (v * Math.sin(th) + 2) * tt - 0.5 * g * tt * tt; };
+  let lo = C.aimPitchMin, hi = C.aimPitchMax;
+  if (yAt(hi) < target.y) return [ay, hi];
+  if (yAt(lo) > target.y) return [ay, lo];
+  for (let i = 0; i < 14; i++) { const mid = (lo + hi) / 2; if (yAt(mid) < target.y) lo = mid; else hi = mid; }
+  return [ay, (lo + hi) / 2];
+}
+
+
 // Step a shell; returns {hitGround:boolean}. Tank hits are checked by caller with segmentHitsTank.
 export function stepShell(s, w, dt = DT) {
   s.px = s.x; s.py = s.y; s.pz = s.z;

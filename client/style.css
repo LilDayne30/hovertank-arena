@@ -203,3 +203,10 @@ button.mini { padding: 3px 8px; font-size: 11px; }
 .tag .lv { font-size: 10px; opacity: .85; margin-right: 3px; color: #ffe8c4; }
 .tag .ttl { display: block; font-size: 9px; opacity: .85; color: #ffe8c4; }
 #board .lv { font-size: 10px; opacity: .7; margin-right: 2px; }
+
+.cpu { font-size: 9px; font-weight: 800; letter-spacing: .05em; background: #6b5138; color: #ffe8c4; border-radius: 4px; padding: 0 4px; margin-right: 4px; vertical-align: 1px; }
+.rules .row.dim { opacity: .45; }
+
+.btn-mute { padding: 6px 9px; font-size: 14px; line-height: 1; }
+.lobby-mute { position: absolute; right: 12px; top: 12px; background: #6b5138; color: #fff7ea; }
+#lobby { position: fixed; }

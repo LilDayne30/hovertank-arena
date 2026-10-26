@@ -40,14 +40,16 @@ export class BattleRoom extends DurableObject {
       const saved = await this.ctx.storage.get('rules');
       if (saved && this.game.size === 0) this.game.setRules(saved);
       this.public = !!(await this.ctx.storage.get('public'));
+      this.game.autoFill = this.public;   // quick-match rooms: empty seats are filled with CPU players
     }
 
     if (url.pathname === '/init') {
       let rules = null, isPublic = false;
       try { const b = await request.json(); rules = b?.rules ?? null; isPublic = !!b?.public; } catch { /* default rules */ }
       rules = cleanRules(rules);
-      this.game.setRules(rules);
       this.public = isPublic;
+      this.game.autoFill = isPublic;
+      this.game.setRules(rules);
       await this.ctx.storage.put({ created: true, rules, public: isPublic });
       this.created = true;
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
@@ -55,7 +57,7 @@ export class BattleRoom extends DurableObject {
     }
     if (url.pathname === '/info') {
       if (!this.created) return json({ exists: false }, 404);
-      return json({ exists: true, players: this.game.size, max: MAX_PLAYERS, full: this.game.isFull(), rules: this.game.rules, public: !!this.public });
+      return json({ exists: true, players: this.game.humans, bots: this.game.botCount, max: MAX_PLAYERS, full: this.game.isFull(), rules: this.game.rules, public: !!this.public });
     }
     if (url.pathname === '/ws') {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
@@ -164,7 +166,7 @@ export class BattleRoom extends DurableObject {
   // tell the matchmaker how many players this public room has (0 = remove it from the list)
   report() {
     if (!this.public || !this.env.MATCH) return;
-    const players = this.game.size;
+    const players = this.game.humans;   // CPU players don't count: they leave when people arrive
     this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode }),

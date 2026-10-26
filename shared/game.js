@@ -4,6 +4,7 @@ import {
   C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate,
 } from './sim.js';
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
+import { BotBrain, BOT_NAMES, randomLook } from './bot.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -44,10 +45,55 @@ export class Game {
     this.winner = null;
     this.matchStart = 0;
     this.matchNo = 1;
+    // CPU players: autoFill = quick-match rooms keep every empty seat filled with a bot;
+    // otherwise rules.bots bots join (invite rooms). Bots never take a seat a human wants.
+    this.autoFill = !!opts.autoFill;
+    this.botSeq = 0;
+  }
+
+  get humans() { let n = 0; for (const p of this.players.values()) if (!p.bot) n++; return n; }
+  get botCount() { return this.players.size - this.humans; }
+
+  wantedBots() {
+    const h = this.humans;
+    if (h === 0) return 0;
+    if (this.autoFill) return MAX_PLAYERS - h;
+    return Math.min(this.rules.bots || 0, MAX_PLAYERS - h);
+  }
+
+  addBot(level) {
+    const used = new Set([...this.players.values()].map((p) => p.name));
+    const name = BOT_NAMES.find((n) => !used.has(n)) || `ボット${this.botSeq + 1}`;
+    const id = `cpu${++this.botSeq}`;
+    const p = this.addPlayer(id, name, { bot: new BotBrain(level) });
+    p.prof = { lv: 0, look: randomLook(), bot: true };
+    return p;
+  }
+
+  // add / remove bots to match wantedBots(); keeps teams even by moving bots, never humans
+  syncBots() {
+    const want = this.wantedBots();
+    const level = (i) => (this.autoFill ? ['normal', 'easy', 'easy'][i % 3] : this.rules.botLevel);   // quick match: gentle for newcomers
+    let changed = false;
+    while (this.botCount > want) {
+      const bots = [...this.players.values()].filter((p) => p.bot);
+      this.removePlayer(bots[bots.length - 1].id, true); changed = true;
+    }
+    while (this.botCount < want && this.players.size < MAX_PLAYERS) { this.addBot(level(this.botCount)); changed = true; }
+    for (const p of this.players.values()) if (p.bot && !this.autoFill && p.bot.level !== this.rules.botLevel) { p.bot = new BotBrain(this.rules.botLevel); changed = true; }
+    if (this.teamMode) {
+      const n = [0, 0]; for (const p of this.players.values()) n[p.team]++;
+      for (const p of this.players.values()) {
+        if (!p.bot || Math.abs(n[0] - n[1]) < 2) continue;
+        const big = n[0] > n[1] ? 0 : 1;
+        if (p.team === big) { p.team ^= 1; n[big]--; n[big ^ 1]++; this.spawn(p); changed = true; }
+      }
+    }
+    if (changed) this.sendRoster();
   }
 
   get teamMode() { return this.rules.mode === 'team'; }
-  setRules(r) { this.rules = cleanRules(r); if (this.teamMode) this.balanceTeams(); }
+  setRules(r) { this.rules = cleanRules(r); if (this.teamMode) this.balanceTeams(); this.syncBots?.(); }
 
   // colour index: free-for-all = seat; teams = red/orange vs blue/cyan
   colorOf(p) {
@@ -75,9 +121,14 @@ export class Game {
   }
 
   get size() { return this.players.size; }
-  isFull() { return this.players.size >= MAX_PLAYERS; }
+  isFull() { return this.humans >= MAX_PLAYERS; }   // bots give their seat up for humans
 
-  addPlayer(id, name) {
+  addPlayer(id, name, extra = {}) {
+    // a human arriving in a room full of bots takes a bot's seat
+    if (!extra.bot && this.players.size >= MAX_PLAYERS) {
+      const b = [...this.players.values()].reverse().find((p) => p.bot);
+      if (b) this.removePlayer(b.id, true);
+    }
     const used = new Set([...this.players.values()].map((p) => p.slot));
     let slot = 0; while (used.has(slot)) slot++;
     const p = {
@@ -85,20 +136,23 @@ export class Game {
       tank: null, hp: C.maxHp, alive: false, respawnAt: 0, invulnUntil: 0,
       kills: 0, deaths: 0, queue: [], lastSeq: 0, lastQueued: 0, credits: 0, dropped: 0,
       connected: true, spawnId: 0, team: 0,
-      m: freshStats(), joinedAt: this.time, prof: null,
+      m: freshStats(), joinedAt: this.time, prof: null, bot: extra.bot || null,
     };
     // a fresh match starts when the first player arrives in an empty room
     if (this.players.size === 0) this.resetMatch();
     p.team = this.smallerTeam(p);
     this.players.set(id, p);
     this.spawn(p);
+    if (!p.bot) this.syncBots();
     this.sendRoster();
     return p;
   }
 
-  removePlayer(id) {
+  removePlayer(id, quiet) {
+    const p = this.players.get(id);
     this.players.delete(id);
     this.shells = this.shells.filter((s) => s.owner !== id);
+    if (p && !p.bot && !quiet) this.syncBots();
     this.sendRoster();
   }
 
@@ -240,6 +294,7 @@ export class Game {
       }
     }
 
+    for (const p of this.players.values()) if (p.bot && p.alive) p.queue.push(p.bot.think(p, this));
     for (const p of this.players.values()) {
       if (!p.alive) {
         if (p.queue.length) { p.lastSeq = p.queue[p.queue.length - 1].seq; p.queue.length = 0; }
@@ -392,7 +447,7 @@ export class Game {
 
   sendRoster() {
     this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
-      id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
+      id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null, bot: p.bot ? p.bot.level : undefined,
     })) });
   }
 }
