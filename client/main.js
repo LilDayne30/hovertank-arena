@@ -275,6 +275,7 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4) {
         showLoading(true, attempt ? '別の部屋を探しています…' : '対戦相手を探しています…');
         id = await quickMatch(ENDPOINT, qmMode, tried, qmSize);
         room = new Room(ENDPOINT, id);
+        room.quick = true;
         bindRoom(room);
         try { await room.connect(name, null); break; } catch (e) { room = null; tried.push(id); if (e.code !== 'full' || attempt === 3) throw e; }
       }
@@ -307,7 +308,7 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4) {
   document.body.classList.add('playing');
   input.enabled = true;
   if (mode === 'create') showInvite();
-  if (mode === 'quick') notice(publicRoom && roster.size <= 1 ? 'クイックマッチ：対戦相手を待っています（招待URLで友達も呼べます）' : 'クイックマッチ：対戦に参加しました');
+  if (mode === 'quick') notice('クイックマッチ：対戦に参加しました');
   if (!input.touchMode) $('center-msg').textContent = 'クリックで操作開始';
   setInterval(() => room?.send('ping', performance.now()), 2000);
 }
@@ -384,7 +385,8 @@ function onSnapshot(m) {
   if (phase !== s.ph) { phase = s.ph; if (phase === 'play') { $('result').classList.add('hidden'); sound.horn(); } }
   sound.setMusic(phase === 'play' ? 'battle' : 'result', phase === 'play' && rules.goal === 'time' && s.tl <= 30);
   teamKills = m.tk || [0, 0];
-  $('timer').textContent = rules.goal === 'kills' ? `${rules.target}キル先取` : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
+  waitLeft = s.ph === 'wait' ? s.tl : 0;
+  $('timer').textContent = s.ph === 'wait' ? 'マッチング中' : rules.goal === 'kills' ? `${rules.target}キル先取` : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
   $('teamscore').classList.toggle('hidden', rules.mode !== 'team');
   if (rules.mode === 'team') $('teamscore').innerHTML = `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${teamKills[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${teamKills[1]} ${TEAM_NAMES[1]}</span>`;
   heal.active = s.hl; heal.next = s.hn;
@@ -1040,7 +1042,7 @@ function showResult(res) {
   $('result').classList.remove('hidden');
   document.exitPointerLock?.();
 }
-let hudT = 0;
+let hudT = 0, waitLeft = 0;
 function updateHud(dt) {
   hudT += dt;
   $('hpbar').style.width = `${local.hp}%`;
@@ -1056,7 +1058,8 @@ function updateHud(dt) {
   if (local.alive && local.invuln) $('shield-msg').textContent = `無敵 ${local.invulnLeft.toFixed(1)}秒（撃つと解除）`;
   if (performance.now() > centerUntil) {
     let msg = '';
-    if (!local.alive && myId && phase === 'play') msg = `リスポーンまで ${local.respawnIn.toFixed(1)} 秒`;
+    if (phase === 'wait') msg = `対戦相手を探しています… ${waitLeft}\n（そのあいだ自由に走れます）`;
+    else if (!local.alive && myId && phase === 'play') msg = `リスポーンまで ${local.respawnIn.toFixed(1)} 秒`;
     else if (!input.touchMode && document.pointerLockElement !== $('game') && $('settings').classList.contains('hidden') && $('invite').classList.contains('hidden') && phase === 'play') msg = 'クリックで操作開始';
     $('center-msg').textContent = msg;
     $('center-msg').classList.remove('pop');

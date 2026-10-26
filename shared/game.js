@@ -10,6 +10,7 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
 export const MAX_QUEUE = 20;   // inputs a client may bank (anti speed-hack)
 const MAX_BURST = 6;           // late inputs processed in one tick to catch up
+export const QM_WAIT = 5;       // s: a new quick-match room waits this long for more people, then bots fill in
 const LONG_KILL = 40;          // m: a kill from farther than this counts as long range
 const ACTIVE_MOVE = 40;        // m driven (or 3 shots) to count as having taken part in a match
 
@@ -48,6 +49,7 @@ export class Game {
     // CPU players: autoFill = quick-match rooms keep every empty seat filled with a bot;
     // otherwise rules.bots bots join (invite rooms). Bots never take a seat a human wants.
     this.autoFill = !!opts.autoFill;
+    this.waitSeconds = opts.waitSeconds ?? QM_WAIT;
     this.botSeq = 0;
   }
 
@@ -56,9 +58,25 @@ export class Game {
   get humans() { let n = 0; for (const p of this.players.values()) if (!p.bot) n++; return n; }
   get botCount() { return this.players.size - this.humans; }
 
+  // quick match: nobody joins a match in progress. New people are let in while a fresh room is
+  // still gathering players ('wait') and between matches ('end'); bots fill seats only at match start.
+  get open() { return this.autoFill && (this.phase === 'wait' || this.phase === 'end') && this.humans < this.capacity; }
+  startWait() {
+    this.phase = 'wait';
+    this.phaseEnds = this.time + this.waitSeconds;
+    this.shells.length = 0;
+    this.io.phase?.('wait');
+  }
+  beginMatch() {
+    this.resetMatch();   // (fills empty seats with bots in quick-match rooms)
+    this.sendRoster();
+    this.io.phase?.('play');
+  }
+
   wantedBots() {
     const h = this.humans;
     if (h === 0) return 0;
+    if (this.autoFill && this.phase === 'wait') return 0;
     if (this.autoFill) return Math.max(0, this.capacity - h);
     return Math.min(this.rules.bots || 0, MAX_PLAYERS - h);
   }
@@ -172,12 +190,14 @@ export class Game {
       m: freshStats(), joinedAt: this.time, prof: null, bot: extra.bot || null,
     };
     // a fresh match starts when the first player arrives in an empty room
-    if (this.players.size === 0) this.resetMatch();
+    // (quick match: first a short wait so people arriving together end up in the same match)
+    if (this.players.size === 0) { if (this.autoFill && !extra.bot) this.startWait(); else this.resetMatch(); }
     p.team = this.smallerTeam(p);
     this.players.set(id, p);
     this.spawn(p);
-    if (!p.bot) this.syncBots();
+    if (!p.bot && !(this.autoFill && this.phase === 'play')) this.syncBots();
     this.sendRoster();
+    if (this.autoFill && this.phase === 'wait' && this.humans >= this.capacity) this.beginMatch();   // full: no need to wait
     return p;
   }
 
@@ -185,7 +205,8 @@ export class Game {
     const p = this.players.get(id);
     this.players.delete(id);
     this.shells = this.shells.filter((s) => s.owner !== id);
-    if (p && !p.bot && !quiet) this.syncBots();
+    // quick match: a seat left during a match stays empty until the next match starts
+    if (p && !p.bot && !quiet && (!this.autoFill || this.phase !== 'play' || this.humans === 0)) this.syncBots();
     this.sendRoster();
   }
 
@@ -235,6 +256,7 @@ export class Game {
     this.matchStart = this.time;
     this.matchNo++;
     for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.m = freshStats(); p.joinedAt = this.time; this.spawn(p); }
+    if (this.autoFill) this.syncBots();
   }
 
   // any player can start a new game (optionally with new rules): scores, timer and positions reset
@@ -321,9 +343,9 @@ export class Game {
     if (this.time >= this.phaseEnds) {
       if (this.phase === 'play') {
         this.endMatch();
+        this.io.phase?.('end');
       } else {
-        this.resetMatch();
-        this.sendRoster();
+        this.beginMatch();
       }
     }
 

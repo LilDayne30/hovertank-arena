@@ -33,13 +33,13 @@ export class Matchmaker extends DurableObject {
     const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
 
     if (url.pathname === '/update') {
-      const { id, players, mode, size } = body;
+      const { id, players, mode, size, open } = body;
       if (!id) return json({ ok: false }, 400);
       if (!players) { this.rooms.delete(id); this.holds.delete(id); await this.ctx.storage.delete(`r:${id}`); return json({ ok: true }); }
       const prev = this.rooms.get(id);
       // a join that we handed out has arrived: release one held seat
       if (prev && players > prev.players) { const h = this.holds.get(id) || []; h.splice(0, players - prev.players); this.holds.set(id, h); }
-      const entry = { id, players, mode: mode === 'team' ? 'team' : 'ffa', size: prev?.size || cleanRules({ mode, size }).size, at: now };
+      const entry = { id, players, mode: mode === 'team' ? 'team' : 'ffa', size: prev?.size || cleanRules({ mode, size }).size, open: open !== false, at: now };
       this.rooms.set(id, entry);
       await this.ctx.storage.put(`r:${id}`, entry);
       return json({ ok: true });
@@ -54,7 +54,7 @@ export class Matchmaker extends DurableObject {
       for (const [id, r] of this.rooms) if (now - r.at > STALE_MS && this.held(id, now) === 0) { this.rooms.delete(id); this.ctx.storage.delete(`r:${id}`); }
       // fill the fullest room first so players actually meet each other
       const candidates = [...this.rooms.values()]
-        .filter((r) => !exclude.has(r.id) && (want === 'any' || r.mode === want) && (r.size || 4) === size)
+        .filter((r) => !exclude.has(r.id) && (want === 'any' || r.mode === want) && (r.size || 4) === size && r.open !== false)
         .map((r) => ({ ...r, taken: r.players + this.held(r.id, now) }))
         .filter((r) => r.taken < (r.size || MAX_PLAYERS))
         .sort((a, b) => b.taken - a.taken || b.at - a.at);
@@ -68,7 +68,7 @@ export class Matchmaker extends DurableObject {
       }
       id = roomCode();
       const rules = cleanRules({ mode: want === 'team' ? 'team' : 'ffa', goal: 'time', size });
-      const entry = { id, players: 0, mode: rules.mode, size: rules.size, at: now };
+      const entry = { id, players: 0, mode: rules.mode, size: rules.size, open: true, at: now };
       this.rooms.set(id, entry);
       hold();
       // other matches arriving while the room is being created join this same room

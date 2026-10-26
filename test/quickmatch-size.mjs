@@ -12,21 +12,25 @@ async function join(mode, size, name) {
   socks.push(st);
   return st;
 }
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const a = await join('ffa', 2, 'a');
-ok(a.roster.players.length === 2 && a.roster.rules.size === 2, `size 2: alone -> ${a.roster.players.length} tanks (${a.roster.players.map((p) => p.name).join(', ')})`);
-ok(a.roster.players.every((p) => !p.bot), 'quick-match roster does not mark anyone as CPU');
+ok(a.roster.players.length === 1, 'size 2: alone at first (gathering players for 5 s)');
 const b = await join('ffa', 2, 'b');
-ok(b.id === a.id, 'second size-2 player joins the same room (takes the bot seat)');
-await new Promise((r) => setTimeout(r, 300));
-ok(a.roster.players.length === 2 && a.roster.players.every((p) => ['a', 'b'].includes(p.name)), `room now: ${a.roster.players.map((p) => p.name).join(', ')}`);
+ok(b.id === a.id, 'second size-2 player arriving during the wait joins the same room');
+await wait(400);
+ok(a.roster.players.length === 2 && a.roster.players.every((p) => ['a', 'b'].includes(p.name)), `1対1 filled by people -> starts at once: ${a.roster.players.map((p) => p.name).join(', ')}`);
 const c = await join('ffa', 2, 'c');
-ok(c.id !== a.id, 'third size-2 player gets a new room (1対1 is full)');
+ok(c.id !== a.id, 'third size-2 player gets a new room');
+await wait(5600);
+ok(c.roster.players.length === 2 && c.roster.players.every((p) => !p.bot), `after the wait a bot fills the seat, not marked as CPU (${c.roster.players.map((p) => p.name).join(', ')})`);
+const c2 = await join('ffa', 2, 'c2');
+ok(c2.id !== c.id, 'no joining a match in progress: next size-2 player gets another room');
 const d = await join('ffa', 3, 'd');
-ok(d.id !== a.id && d.id !== c.id && d.roster.players.length === 3, `size 3 is a separate room with ${d.roster.players.length} tanks`);
-const e = await join('any', 4, 'e');
-ok(![a.id, c.id, d.id].includes(e.id) && e.roster.players.length === 4, `size 4 ("どちらでも") -> its own 4-tank room`);
+ok(![a.id, c.id, c2.id].includes(d.id), 'size 3 is a separate room');
 const f = await join('team', 2, 'f');
-ok(f.roster.rules.mode === 'team' && f.roster.rules.size === 4 && f.roster.players.length === 4, 'team battle is always 2 v 2 (size request ignored)');
+ok(f.roster.rules.mode === 'team' && f.roster.rules.size === 4, 'team battle is always 2 v 2 (size request ignored)');
+await wait(5600);
+ok(d.roster.players.length === 3 && f.roster.players.length === 4, `after the wait: size-3 room ${d.roster.players.length} tanks, team room ${f.roster.players.length}`);
 for (const s of socks) { s.ws.send(JSON.stringify(['leave', 1])); s.ws.close(); }
 await new Promise((r) => setTimeout(r, 800));
 console.log('stats after leaving', await (await fetch(`${URL}/api/stats`)).json());

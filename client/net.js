@@ -58,6 +58,7 @@ export class Room {
     u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
     if (name) u.searchParams.set('name', name);
     if (this.reconnectionToken) u.searchParams.set('token', this.reconnectionToken);
+    else if (this.quick) u.searchParams.set('qm', '1');   // matched by quick match (not an invite link)
     return u.toString();
   }
 

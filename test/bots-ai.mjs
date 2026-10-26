@@ -69,34 +69,45 @@ function run(levels, seconds, rules = {}) {
   ok(g.teamKills().reduce((a, b) => a + b, 0) >= 6, `team mode kills ${JSON.stringify(g.teamKills())}`);
 }
 
-// seat filling
+// seat filling (quick match): wait for people, then bots fill; nobody joins a match in progress
 {
-  const g = new Game(world, { send() {}, broadcast() {} }, { autoFill: true });
+  const steps = (g, sec) => { for (let i = 0; i < sec / DT; i++) g.step(); };
+  const g = new Game(world, { send() {}, broadcast() {} }, { autoFill: true, matchSeconds: 20 });
   g.addPlayer('h1', 'human');
-  ok(g.humans === 1 && g.botCount === 3, `quick-match room: 1 human -> ${g.botCount} bots`);
-  g.addPlayer('h2', 'human2'); g.addPlayer('h3', 'human3');
-  ok(g.humans === 3 && g.botCount === 1 && g.players.size === 4, `3 humans -> ${g.botCount} bot`);
-  g.addPlayer('h4', 'human4');
-  ok(g.humans === 4 && g.botCount === 0 && !g.isFull() === false, '4th human takes the last bot seat, room now full');
-  g.removePlayer('h4'); g.removePlayer('h3');
-  ok(g.botCount === 2, `humans leave -> bots come back (${g.botCount})`);
-  g.removePlayer('h2'); g.removePlayer('h1');
-  ok(g.players.size === 0, 'last human leaves -> bots leave too');
+  ok(g.phase === 'wait' && g.botCount === 0 && g.open, `fresh quick-match room waits for people first (phase ${g.phase}, open ${g.open})`);
+  g.addPlayer('h2', 'human2');
+  steps(g, 5.2);
+  ok(g.phase === 'play' && g.humans === 2 && g.botCount === 2, `after the ${g.waitSeconds} s wait: 2 people + ${g.botCount} bots, match started`);
+  ok(!g.open, 'room is closed to quick match while the match is on');
+  g.removePlayer('h2');
+  ok(g.botCount === 2 && g.players.size === 3, 'a person leaving mid-match: seat stays empty (no bot pops in)');
+  steps(g, 20.5);
+  ok(g.phase === 'end' && g.open, 'between matches the room opens again');
+  g.addPlayer('h3', 'newcomer');
+  ok(g.humans === 2 && g.players.size <= 4, `newcomer joins during the result screen (${g.humans} people, ${g.botCount} bots)`);
+  steps(g, 10.5);
+  ok(g.phase === 'play' && g.players.size === 4 && g.botCount === 2, `next match starts full: ${g.humans} people + ${g.botCount} bots`);
+  g.removePlayer('h1'); g.removePlayer('h3');
+  ok(g.players.size === 0, 'last person leaves -> bots leave too');
+
+  // full of people during the wait: starts at once
+  const gf = new Game(world, { send() {}, broadcast() {} }, { autoFill: true, rules: { size: 2 } });
+  gf.addPlayer('a', 'a'); gf.addPlayer('b', 'b');
+  ok(gf.phase === 'play' && gf.botCount === 0, '2 people for a 1対1: starts immediately without bots');
+
   // quick match with a chosen size; bots look like players and follow the people's level
   let roster = null;
   const g3 = new Game(world, { send() {}, broadcast: (t, d) => { if (t === 'roster') roster = d; } }, { autoFill: true, rules: { size: 2 } });
   g3.addPlayer('h1', 'human');
+  g3.setProfile('h1', { key: 'x', lv: 45, look: null });
+  steps(g3, 5.2);
   ok(g3.players.size === 2 && g3.botCount === 1, `quick match size 2 (1対1): ${g3.humans} human + ${g3.botCount} bot`);
   const rb = roster.players.find((p) => p.id !== 'h1');
   ok(rb.bot === undefined && rb.lv >= 1 && !/CPU/.test(rb.name), `quick-match bot is not labelled as CPU (name ${rb.name}, Lv${rb.lv})`);
-  const before = [...g3.players.values()].find((p) => p.bot).bot.skill;
-  g3.setProfile('h1', { key: 'x', lv: 45, look: null });
   const bot = [...g3.players.values()].find((p) => p.bot);
-  ok(bot.bot.skill > before + 0.3 && Math.abs(bot.prof.lv - 45) <= 3, `bot follows the player's level: skill ${before.toFixed(2)} -> ${bot.bot.skill.toFixed(2)} (shown as Lv${bot.prof.lv})`);
-  g3.addPlayer('h2', 'friend');
-  ok(g3.humans === 2 && g3.botCount === 0 && g3.isFull(), 'size 2: a second person takes the bot seat, room full');
+  ok(bot.bot.skill > 0.7 && Math.abs(bot.prof.lv - 45) <= 3, `bot matches a Lv45 player: skill ${bot.bot.skill.toFixed(2)} (shown as Lv${bot.prof.lv})`);
   const g4 = new Game(world, { send() {}, broadcast() {} }, { autoFill: true, rules: { size: 3 } });
-  g4.addPlayer('h1', 'a');
+  g4.addPlayer('h1', 'a'); steps(g4, 5.2);
   ok(g4.players.size === 3, `quick match size 3: ${g4.players.size} tanks`);
   const g2 = new Game(world, { send() {}, broadcast() {} }, { rules: { bots: 2, botLevel: 'hard' } });
   g2.addPlayer('h1', 'human');

@@ -29,6 +29,7 @@ export class BattleRoom extends DurableObject {
       send: (id, type, data) => this.sendTo(id, type, data),
       broadcast: (type, data) => this.broadcast(type, data),
       matchEnd: (summary) => this.awardMatch(summary),
+      phase: () => this.report(),   // quick match: tell the matchmaker when the room opens / closes
     }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined });
   }
 
@@ -91,6 +92,9 @@ export class BattleRoom extends DurableObject {
       return this.reject(ws, 'expired', 4004, '再接続の期限が切れました');
     } else {
       if (this.game.isFull()) return this.reject(ws, 'full', 4001, 'この部屋は満室です');
+      // joins from quick match only while the room is gathering players or between matches
+      // (an invite link still lets a friend in at any time)
+      if (url.searchParams.get('qm') && this.game.humans > 0 && !this.game.open) return this.reject(ws, 'full', 4001, 'この部屋は試合中です');
       id = rand(4);
       const t = rand(12);
       this.tokens.set(t, id);
@@ -169,7 +173,7 @@ export class BattleRoom extends DurableObject {
     const players = this.game.humans;   // CPU players don't count: they leave when people arrive
     this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode, size: this.game.rules.size }),
+      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode, size: this.game.rules.size, open: players === 0 || this.game.open }),
     }).catch(() => {});
   }
 
