@@ -102,11 +102,11 @@ async function init() {
       for (const id of ['btn-quick', 'btn-create', 'btn-join']) $(id).disabled = off;
     },
   });
-  // player count for quick match; doubles as the "can we reach the server" probe
+  // server reachability probe (also fetches the quick-match player count, not displayed yet)
   const showStats = () => fetchStats(ENDPOINT).then((st) => {
     pwa.setReachable(true);
-    if (st) $('qm-stats').textContent = st.players ? `いま ${st.players} 人がクイックマッチで遊んでいます` : 'いまクイックマッチで遊んでいる人はいません（最初の1人になります）';
-  }).catch(() => { pwa.setReachable(false); $('qm-stats').textContent = ''; });
+    // (the player count is not shown for now: with few players it would make the game look empty)
+  }).catch(() => { pwa.setReachable(false); });
   showStats(); setInterval(() => { if (!room) showStats(); }, 15000);
   window.addEventListener('online', showStats);
   showLoading(true, '読み込み中…');

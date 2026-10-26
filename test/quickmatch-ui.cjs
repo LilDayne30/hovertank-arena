@@ -7,7 +7,6 @@ const { chromium } = require('playwright');
   const A = await mk();
   await A.waitForTimeout(800);
   await A.screenshot({ path: 'scratch/shots/qm_lobby.png' });
-  console.log('lobby stats line:', await A.textContent('#qm-stats'));
   await A.click('#qm-mode button[data-v="ffa"]');
   await A.click('#btn-quick'); await A.waitForTimeout(1500);
   console.log('A notice:', await A.textContent('#notice'));
