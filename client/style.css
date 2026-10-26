@@ -36,6 +36,11 @@ input { font: inherit; border-radius: 6px; border: 1px solid #6b5138; padding: 8
 .panel .row { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 #lobby-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
 #lobby-status { min-height: 1.4em; font-size: 14px; color: #ffd9a0; }
+#offline { color: #ffb08a; font-size: 14px; margin: 6px 0; }
+#install { margin: 8px 0; }
+#install button { font-size: 14px; padding: 8px 14px; }
+#install-help { font-size: 13px; color: #ffe8c4; margin: 6px 0 0; line-height: 1.5; }
+button:disabled { opacity: .5; cursor: default; }
 #credits-link { color: #ffd9a0; font-size: 12px; }
 #invite-url { width: 100%; font-size: 13px; }
 #quality-row button[aria-pressed="true"] { background: #fff; }

@@ -45,6 +45,17 @@
 - **ニューゲーム**：⚙（設定）の「ニューゲーム」を2回押すと、部屋の全員のスコア・タイマー・位置をリセットして最初からやり直せます。試合終了画面の「すぐに次の試合へ」でも同じです。
 - **リスポーン直後の無敵**：2秒間シールドが付きますが、**自分が撃つとその場で解除**されます（無敵のまま一方的に攻撃できないようにするため）。
 
+## アプリとして使う（PWA）
+
+ブラウザのメニューから「ホーム画面に追加」すると、アドレスバーのない全画面のアプリとして起動できます（ストア経由のインストールは不要）。
+
+- **Android（Chrome / Edge）・PC（Chrome / Edge）**：ロビーに「ホーム画面に追加」ボタンが出ます。押すとブラウザのインストール確認が開きます。起動すると全画面・横向きになります。
+- **iPhone / iPad（Safari）**：iOS にはボタンからインストールさせる仕組みがないため、ボタンを押すと「共有ボタン →『ホーム画面に追加』」の手順を表示します。iOS では横向きの固定はできません（縦向きのときは「横向きにしてください」と表示）。
+- **2回目以降の起動が速い**：Service Worker が画面・プログラム・3Dモデル・アイコン（計約400KB）を端末に保存し、次回からはネットに取りに行かずに表示します。ページ本体だけは毎回ネットを優先して取りに行くので、更新は次の起動で反映されます。古い保存分は更新時に自動で消えます。
+- **オフライン時**：ロビーとステージは表示されますが、対戦はできません（「オフラインです」と表示し、対戦ボタンを無効にします）。`/api`（部屋・マッチング・WebSocket）は保存も横取りもしません。
+- 招待URLはアプリではなくブラウザで開きます（そのまま遊べます）。
+- アイコンは `tools/render_icon.py`（Blender で戦車を描画）と `tools/make_icons.py`（背景と合成し、各サイズを書き出し）で作り直せます。
+
 ## ローカルでの起動
 
 Node.js 20 以上が必要です（22 で確認）。
@@ -61,6 +72,7 @@ npm run dev        # ビルドしてから wrangler dev を起動 → http://loc
 
 ```bash
 npm run dev                                   # 別ターミナルで起動しておく
+node test/pwa.cjs                             # PWA：マニフェスト・アイコン・Chromeのインストール可否判定・Service Worker・オフライン起動・SW下での対戦（要サーバー、ビルド後に wrangler dev で）
 node test/quickmatch.mjs                      # クイックマッチ：部屋の詰め方・満室で次の部屋・希望モード・招待部屋は対象外・同時8人でもあふれない（要サーバー）
 npm run test:bots                             # 4つのWebSocketクライアントで同期・命中・満室・存在しない部屋・再接続・無敵解除を確認
 node test/sim-drift.mjs                       # ドリフト・ターボの溜まり方と加速を確認（サーバー不要）
@@ -101,7 +113,7 @@ npx wrangler dev --var MATCH_SECONDS:8        # 試合時間を短くして、�
 ## 構成
 
 ```
-client/   画面（PlayCanvas）。main.js＝描画・予測・補間・HUD、input.js＝キーボード／マウス／タッチ、net.js＝通信、fx.js＝エフェクト、stage.js＝遮蔽物の見た目
+client/   画面（PlayCanvas）。main.js＝描画・予測・補間・HUD、input.js＝キーボード／マウス／タッチ、net.js＝通信、fx.js＝エフェクト、stage.js＝遮蔽物の見た目、pwa.js＝インストールボタンとオフライン表示、sw-template.js＝Service Worker の元（ビルド時に保存ファイル一覧を埋め込んで dist/sw.js を生成）
 worker/   Cloudflare Worker（index.js＝静的ファイル配信と部屋の振り分け）と Durable Object（room.js＝接続・席・30Hzループ、matchmaker.js＝クイックマッチ用の公開ルーム一覧）
 shared/   クライアントとサーバーで共通のコード。sim.js＝移動・砲弾・ドリフト、game.js＝試合ルール、arena.js＝スポーン位置と遮蔽物の配置
 public/   配信する素材（GLB、当たり判定用の高さマップ）とクレジットページ
@@ -134,7 +146,7 @@ tools/build_assets.sh <arena.blend> <Tank3.blend>
 - ステージ：**Low Poly Desert Arena** by **H4kor** — https://h4kor.itch.io/low-poly-desert-arena — [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
   - 変更点：.blend から GLB に変換、4倍に拡大、カメラとライトを削除、法線を再計算、マテリアルを元の単色のまま glTF 用に再構成、頂点を量子化、当たり判定用の高さマップを生成、遮蔽物（中央の丸い丘と壁8枚）を追加
 - 戦車：**Tank Pack（Animated Tanks Pack）** by **Quaternius** — https://quaternius.com/packs/animatedtanks.html — [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
-  - Tank3 を使用。車体と履帯、砲塔と砲身をそれぞれ結合し、アニメーションを除去、プレイヤーごとに色を変更
+  - Tank3 を使用。車体と履帯、砲塔と砲身をそれぞれ結合し、アニメーションを除去、プレイヤーごとに色を変更。アプリのアイコンもこの戦車を赤く塗って描画したもの
 - PlayCanvas Engine：MIT License
 
 ソースコード自体のライセンスはまだ決めていません（`UNLICENSED`）。
@@ -147,4 +159,5 @@ tools/build_assets.sh <arena.blend> <Tank3.blend>
 - 通信量は1人あたり受信で毎秒十数KB程度です（スナップショットをJSONで毎秒30回送るため）。
 - エフェクトは画質「低・中・高」で量が変わります（低：最大70個、中：150個、高：230個の粒）。実機での負荷は未計測です。
 - iOS Safari は全画面表示と画面の向きの固定に対応していないため、縦向きのときは「横向きにしてください」と表示します。
+- PWA のインストールと全画面起動は、自動テスト（ヘッドレスChrome の判定）では合格していますが、Android・iPhone の実機ではまだ確認していません。
 - 部屋の状態はメモリ上にあるため、Cloudflare 側で Durable Object が再起動されると、その部屋の試合はリセットされます。

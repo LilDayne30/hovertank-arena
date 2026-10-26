@@ -7,6 +7,7 @@ import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, T
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
+import { setupPwa } from './pwa.js';
 
 // ------------------------------------------------------------------ config
 const ENDPOINT = location.origin;   // the Worker serves both the page and /api
@@ -64,11 +65,22 @@ async function init() {
   document.querySelectorAll('#qm-mode button').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
   paintQm();
   $('btn-quick').onclick = () => start('quick', null, null, qmMode);
-  const showStats = () => fetchStats(ENDPOINT).then((st) => { if (st) $('qm-stats').textContent = st.players ? `いま ${st.players} 人がクイックマッチで遊んでいます` : 'いまクイックマッチで遊んでいる人はいません（最初の1人になります）'; }).catch(() => {});
-  showStats(); setInterval(() => { if (!room) showStats(); }, 15000);
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   wireUi();
+  const pwa = setupPwa({
+    onOffline: (off) => {
+      $('offline').classList.toggle('hidden', !off);
+      for (const id of ['btn-quick', 'btn-create', 'btn-join']) $(id).disabled = off;
+    },
+  });
+  // player count for quick match; doubles as the "can we reach the server" probe
+  const showStats = () => fetchStats(ENDPOINT).then((st) => {
+    pwa.setReachable(true);
+    if (st) $('qm-stats').textContent = st.players ? `いま ${st.players} 人がクイックマッチで遊んでいます` : 'いまクイックマッチで遊んでいる人はいません（最初の1人になります）';
+  }).catch(() => { pwa.setReachable(false); $('qm-stats').textContent = ''; });
+  showStats(); setInterval(() => { if (!room) showStats(); }, 15000);
+  window.addEventListener('online', showStats);
   showLoading(true, '読み込み中…');
   await setupEngine();
   showLoading(false);

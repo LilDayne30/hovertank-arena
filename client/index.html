@@ -6,7 +6,13 @@
   <meta name="theme-color" content="#2b1d12" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="HoverTank" />
+  <meta name="description" content="滑って、撃って、跳べ。最大4人のオンライン対戦ホバータンクバトル。インストール不要、PCとスマホのブラウザで遊べます。" />
   <title>Hover Tank Arena</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/icons/favicon-64.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -62,7 +68,12 @@
       <button id="btn-join" type="button" class="hidden">この部屋に参加</button>
     </div>
     </div>
+    <p id="offline" class="hidden">オフラインです。対戦にはインターネット接続が必要です。</p>
     <p id="lobby-status"></p>
+    <div id="install" class="hidden">
+      <button id="btn-install" type="button">ホーム画面に追加</button>
+      <p id="install-help" class="hidden"></p>
+    </div>
     <a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット・ライセンス</a>
   </div>
 
