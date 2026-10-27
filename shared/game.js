@@ -307,7 +307,7 @@ export class Game {
     const contested = this.teamMode ? new Set(active.map((p) => p.team)).size === 2 : active.length >= 2;
     const ranked = list.filter((r) => active.some((p) => p.id === r.id));
     return {
-      matchNo: this.matchNo,
+      matchNo: this.matchNo, seconds: Math.max(0, this.time - this.matchStart),
       players: all.map((p) => {
         const m = p.m;
         const win = contested && (this.teamMode ? winner.team === p.team : winner.id === p.id);
@@ -321,7 +321,7 @@ export class Game {
           active: isActive(p), minutes: Math.max(0, this.time - Math.max(this.matchStart, p.joinedAt)) / 60,
           win, draw, place: ranked.findIndex((r) => r.id === p.id) + 1, players: active.length, team: this.teamMode,
         };
-        return { id: p.id, prof: p.prof, stats, ctx };
+        return { id: p.id, prof: p.prof, bot: !!p.bot, stats, ctx };
       }),
     };
   }

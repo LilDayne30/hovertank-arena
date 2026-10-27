@@ -9,13 +9,17 @@
     { "name": "ROOMS", "class_name": "BattleRoom" },
     { "name": "MATCH", "class_name": "Matchmaker" },
     { "name": "PROFILES", "class_name": "PlayerProfile" },
-    { "name": "CODES", "class_name": "TransferCodes" }
+    { "name": "CODES", "class_name": "TransferCodes" },
+    { "name": "STATS", "class_name": "GameStats" }
   ] },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["BattleRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["Matchmaker"] },
-    { "tag": "v3", "new_sqlite_classes": ["PlayerProfile", "TransferCodes"] }
+    { "tag": "v3", "new_sqlite_classes": ["PlayerProfile", "TransferCodes"] },
+    { "tag": "v4", "new_sqlite_classes": ["GameStats"] }
   ],
   "rules": [{ "type": "Data", "globs": ["**/*.bin"], "fallthrough": true }],
+  // owner's dashboard (/admin.html): SHA-256 of the admin key. The key itself is never stored here.
+  "vars": { "ADMIN_KEY_HASH": "a746452ff0c0cbf7d8e64ea950c1fea7831fb2f5e011aeff7b8dc8817ffb6c48" },
   "observability": { "enabled": true }
 }

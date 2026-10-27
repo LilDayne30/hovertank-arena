@@ -5,6 +5,7 @@ import { makeWorld } from '../shared/sim.js';
 import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles, cleanRules } from '../shared/arena.js';
 import { Game } from '../shared/game.js';
 import { TOKEN_RE, profileKey, profileStub } from './profile.js';
+import { statEvent } from './stats.js';
 import meta from '../public/assets/arena_hf.json';
 import heights from '../public/assets/arena_hf.bin';
 
@@ -146,16 +147,34 @@ export class BattleRoom extends DurableObject {
   awardMatch(summary) {
     if (!this.env.PROFILES) return;
     const matchId = `${this.roomId}:${this.startedAt || (this.startedAt = Date.now())}:${summary.matchNo}`;
+    const humans = summary.players.filter((e) => !e.bot);
+    const results = new Map();
+    const jobs = [];
     for (const e of summary.players) {
       if (!e.prof?.key) continue;
       const req = profileStub(this.env, e.prof.key).fetch('https://profile/award', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ matchId, stats: e.stats, ctx: e.ctx }),
       }).then((r) => r.json()).then((res) => {
+        results.set(e.id, res);
         this.sendTo(e.id, 'prog', res);
         const p = this.game.players.get(e.id);
         if (p?.prof && res.after && res.after.level !== p.prof.lv) this.game.setProfile(e.id, { ...p.prof, lv: res.after.level });
       }).catch((err) => console.warn('award', err?.message));
       this.ctx.waitUntil?.(req);
+      jobs.push(req);
+    }
+    // owner's statistics (anonymous profile keys only)
+    if (humans.length) {
+      const r = this.game.rules;
+      const kind = this.public ? (r.mode === 'team' ? 'quick-team' : `quick-${r.size}`) : `private-${r.mode}`;
+      const send = Promise.allSettled(jobs).then(() => statEvent(this.env, this.ctx, {
+        type: 'match', kind, humans: humans.length, bots: summary.players.length - humans.length, seconds: summary.seconds,
+        players: humans.map((e) => {
+          const res = results.get(e.id);
+          return { pkey: e.prof?.key, minutes: e.ctx.minutes, lv: res?.after?.level || e.prof?.lv, missions: res?.missions?.length || 0, titles: res?.ach?.length || 0 };
+        }),
+      }));
+      this.ctx.waitUntil?.(send);
     }
   }
 
@@ -169,6 +188,7 @@ export class BattleRoom extends DurableObject {
 
   // tell the matchmaker how many players this public room has (0 = remove it from the list)
   report() {
+    statEvent(this.env, this.ctx, { type: 'room', roomId: this.roomId, humans: this.game.humans, public: !!this.public });
     if (!this.public || !this.env.MATCH) return;
     const players = this.game.humans;   // CPU players don't count: they leave when people arrive
     this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {

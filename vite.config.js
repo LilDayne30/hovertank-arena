@@ -34,7 +34,7 @@ const serviceWorker = () => ({
       }
     };
     walk('');
-    const list = files.filter((f) => f !== 'sw.js' && !f.endsWith('.html') && !/^assets\/.*\.(glb|bin)$/.test(f)).sort();
+    const list = files.filter((f) => f !== 'sw.js' && !f.endsWith('.html') && !/^assets\/.*\.(glb|bin)$/.test(f) && !/^build\/admin-/.test(f)).sort();
     const h = createHash('sha256');
     for (const f of [...list, 'index.html']) h.update(f).update(readFileSync(join(dist, f)));
     const urls = ['/', ...list.map((f) => `/${f}`)];
@@ -48,7 +48,11 @@ const serviceWorker = () => ({
 export default defineConfig({
   root: 'client',
   publicDir: '../public',
-  build: { outDir: '../dist', emptyOutDir: true, assetsDir: 'build', target: 'es2020', chunkSizeWarningLimit: 2000 },
+  build: {
+    outDir: '../dist', emptyOutDir: true, assetsDir: 'build', target: 'es2020', chunkSizeWarningLimit: 2000,
+    // the game + the owner's statistics page (/admin.html, not cached by the service worker)
+    rollupOptions: { input: { main: join(import.meta.dirname, 'client', 'index.html'), admin: join(import.meta.dirname, 'client', 'admin.html') } },
+  },
   server: { host: true },
   plugins: [precompress(), serviceWorker()],
 });
