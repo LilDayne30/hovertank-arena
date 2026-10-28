@@ -1,6 +1,6 @@
 # Hover Tank Arena
 
-**公開URL：https://hovertank-arena.danaoki30.workers.dev**
+**公開URL：https://hovertank-arena.lildayne.workers.dev**
 
 最大4人で遊べる、軽量な3Dホバー戦車のブラウザ対戦ゲームです。三人称視点で、滑る・撃つ・跳ぶ操作の気持ちよさを優先しています。PC（キーボード＋マウス）とスマートフォン（タッチ、横画面）に対応しています。
 
