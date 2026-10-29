@@ -33,6 +33,10 @@ const store = {
 let app, device, world, tankAsset, camera, root, fx, looks, profile, pui;
 const preview = { look: null, yaw: 0.6, v: null };
 const sound = new Sound();
+// hit stop: on a kill the picture freezes for a split second (tanks, camera, effects), then catches up.
+// Only the rendering pauses: inputs, prediction and the server keep running, so nothing desyncs.
+const hitstop = { until: 0, lag: 0, frozen: null };
+function hitStop(ms) { hitstop.until = Math.max(hitstop.until, performance.now() + ms); }
 let lastCharge = 0;   // garage preview (lobby: its own tank on the hill; in a room: your tank)
 let input;
 let room = null, myId = null, mySlot = 0, phase = 'play';
@@ -53,7 +57,7 @@ const mats = {};
 const heal = { active: false, next: 0, e: null, tag: null };
 let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null, publicRoom = false;
 const sameTeam = (id) => rules.mode === 'team' && roster.get(id)?.team === myTeam;
-window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; } };
+window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; }, get app() { return app; } };
 
 // ------------------------------------------------------------------ boot
 init().catch((e) => { console.error(e); showLoading(false); $('lobby-status').textContent = `初期化に失敗しました: ${e.message}`; });
@@ -95,6 +99,11 @@ async function init() {
     onSaved: () => { if (room) room.send('look', 1); },
   });
   profile.load().catch((e) => console.warn('profile', e.message));
+  if (DEBUG) window.__ht.fxKill = (style, d = 16) => {   // debug: play a kill (effect + hit stop) in front of the camera
+    const p = camera.getPosition(), f = camera.forward, x = p.x + f.x * d, z = p.z + f.z * d, gy = heightAt(world, x, z);
+    fx.killStyle(x, gy + C.hoverHeight, z, mats.slotLit[1], style, { groundY: gy, big: true });
+    hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; centerFlash('撃破！', 1200, true);
+  };
   if (DEBUG) window.__ht.preview = (look) => { preview.look = look ? { ...DEFAULT_LOOK, ...look } : null; if (preview.v) removeTank('__preview'); $('lobby').classList.toggle('hidden', !!look); };
   const pwa = setupPwa({
     onOffline: (off) => {
@@ -159,6 +168,7 @@ async function setupEngine() {
   buildStage(app, root, cover);
   makeMaterials();
   makeHealPickup();
+  fx.flash(0, -60, 0, [1, 1, 1], 0.001, 0.05);   // compile the flash-light shader variants now, not on the first kill
 
   input = new Input(canvas, {
     touchLayer: $('touch-layer'), stickBase: $('stick-base'), stickKnob: $('stick-knob'),
@@ -453,17 +463,23 @@ function update(dt) {
   const alpha = acc / DT;
 
   if (serverTick !== null) serverTick += dt / DT;
-  const rt = serverTick === null ? null : serverTick - INTERP_TICKS;
+  // during a hit stop, remote tanks are rendered further in the past (frozen); afterwards the extra
+  // delay melts away so they catch up smoothly
+  const stopping = performance.now() < hitstop.until;
+  const vdt = stopping ? dt * 0.03 : dt;
+  if (stopping) hitstop.lag += (dt / DT) * 0.97;
+  else if (hitstop.lag > 0) { hitstop.lag *= Math.exp(-5 * dt); if (hitstop.lag < 0.02) hitstop.lag = 0; }
+  const rt = serverTick === null ? null : serverTick - INTERP_TICKS - hitstop.lag;
 
   local.offset.mulScalar(Math.exp(-12 * dt));
-  renderLocal(alpha, dt);
+  renderLocal(alpha, dt, stopping);
   if (rt !== null) { renderRemote(rt, dt); flushEvents(rt); }
-  tankFx(dt);
+  tankFx(vdt);
   updateHealPickup(dt);
   if (preview.look) garageCamera(dt, tanks.get(myId)?.pos); else updateCamera(dt);
   computeAimPoint();
   updateLocalShells(dt);
-  fx.update(dt);
+  fx.update(vdt);
   updateTags();
   updateHud(dt);
   const cp = camera.getPosition();
@@ -675,15 +691,21 @@ function placeTank(v, x, y, z, yaw, aimYaw, vx, vz, visible, invuln, time) {
   if (v.shield.enabled) { v.shieldMat.opacity = 0.22 + Math.sin(time * 6) * 0.08; v.shieldMat.update(); }
 }
 
-function renderLocal(alpha) {
+function renderLocal(alpha, dt, stopping) {
   if (!myId) return;
   const v = getTank(myId);
-  if (!local.alive || !local.t) { placeTank(v, 0, 0, 0, 0, 0, 0, 0, false); return; }
+  if (!local.alive || !local.t) { placeTank(v, 0, 0, 0, 0, 0, 0, 0, false); hitstop.frozen = null; return; }
   const a = local.prev, b = local.t;
-  const x = pc.math.lerp(a.x, b.x, alpha) + local.offset.x;
-  const y = pc.math.lerp(a.y, b.y, alpha) + local.offset.y;
-  const z = pc.math.lerp(a.z, b.z, alpha) + local.offset.z;
-  const yaw = a.yaw + wrapPi(b.yaw - a.yaw) * alpha;
+  let x = pc.math.lerp(a.x, b.x, alpha) + local.offset.x;
+  let y = pc.math.lerp(a.y, b.y, alpha) + local.offset.y;
+  let z = pc.math.lerp(a.z, b.z, alpha) + local.offset.z;
+  let yaw = a.yaw + wrapPi(b.yaw - a.yaw) * alpha;
+  if (stopping) {
+    // hold the drawn tank where it was; the offset then eases it back after the stop
+    const f = hitstop.frozen || (hitstop.frozen = { x, y, z, yaw });
+    local.offset.x += f.x - x; local.offset.y += f.y - y; local.offset.z += f.z - z;
+    x = f.x; y = f.y; z = f.z; yaw = f.yaw;
+  } else hitstop.frozen = null;
   v.boost = b.boost; v.boostLvl = b.boostLvl; v.charge = b.charge; v.drifting = local.sliding; v.invulnLeft = local.invulnLeft;
   if (v.lastSpawn !== local.spawnId) { v.lastSpawn = local.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[mySlot % 4]); sound.respawn(null, true); }
   v.hp = local.hp;
@@ -775,12 +797,13 @@ function flushEvents(rt) {
     } else if (e.t === 'boost') {
       if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) { fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); sound.boost(v.pos, false, e.l); } }
     } else if (e.t === 'kill') {
-      const slot = roster.get(e.v)?.slot ?? 0;
-      fx.killStyle(e.x, e.y, e.z, mats.slotLit[slot % 4], roster.get(e.k)?.look?.boom);
+      const vt = tanks.get(e.v);
+      const mine = e.k === myId, me = e.v === myId;
+      fx.killStyle(e.x, e.y, e.z, vt?.mats?.[0] || mats.slotLit[(roster.get(e.v)?.slot ?? 0) % 4], roster.get(e.k)?.look?.boom, { groundY: heightAt(world, e.x, e.z), big: mine || me });
       feed(e.k, e.v);
-      sound.kill(e, e.k === myId, e.v === myId);
-      if (e.v === myId) centerFlash('撃破された…', 1800);
-      else if (e.k === myId) { centerFlash('撃破！', 1200, true); fx.addShake(0.3); }
+      sound.kill(e, mine, me);
+      if (me) { centerFlash('撃破された…', 1800); hitStop(180); screenFlash('death'); sound.impact(); fovKick = 10; }
+      else if (mine) { centerFlash('撃破！', 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; }
     }
   }
 }
@@ -1022,6 +1045,7 @@ function centerFlash(text, ms, big) {
   el.textContent = text; centerUntil = performance.now() + ms;
   el.classList.remove('pop'); void el.offsetWidth; if (big) el.classList.add('pop');
 }
+function screenFlash(kind) { const el = $('flash'); el.className = ''; void el.offsetWidth; el.className = kind; }
 function flashHitmark() { const h = $('hitmark'); h.classList.add('on'); setTimeout(() => h.classList.remove('on'), 60); }
 function flashHeal() { const h = $('hpwrap'); h.classList.add('healed'); setTimeout(() => h.classList.remove('healed'), 700); }
 let noticeTimer = 0;

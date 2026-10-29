@@ -36,7 +36,9 @@ export class Sound {
       comp.threshold.value = -16; comp.knee.value = 8; comp.ratio.value = 6; comp.attack.value = 0.002; comp.release.value = 0.18;
       this.limiter = c.createDynamicsCompressor();
       this.limiter.threshold.value = -2; this.limiter.ratio.value = 20; this.limiter.attack.value = 0.001; this.limiter.release.value = 0.05;
-      this.master.connect(comp); comp.connect(this.limiter); this.limiter.connect(c.destination);
+      // master low-pass, normally wide open; dips for a moment on a kill (muffled "impact" feel)
+      this.duck = c.createBiquadFilter(); this.duck.type = 'lowpass'; this.duck.frequency.value = 20000; this.duck.Q.value = 0.7;
+      this.master.connect(this.duck); this.duck.connect(comp); comp.connect(this.limiter); this.limiter.connect(c.destination);
       this.sfx = c.createGain(); this.sfx.connect(this.master);
       this.bgm = c.createGain(); this.bgm.connect(this.master);
       // shared reverb (generated impulse) for big, roomy explosions
@@ -214,6 +216,15 @@ export class Sound {
     this.tone(node, { type: 'sawtooth', f0: 180, f1: 900, dur: 0.6, gain: 0.25, curve: 'lin' });
     this.noise(node, { type: 'bandpass', f0: 300, f1: 3000, q: 2, dur: 0.6, gain: 0.35 });
     this.tone(node, { f0: NOTE(84), t: 0.55, dur: 0.4, gain: 0.3 });
+  }
+  // hit stop: muffle everything for a split second, then open up again, under a sub-bass hit
+  impact() {
+    if (!this.ready) return;
+    const t = this.ctx.currentTime + this.at, f = this.duck.frequency;
+    f.cancelScheduledValues(t); f.setValueAtTime(380, t); f.exponentialRampToValueAtTime(20000, t + 0.5);
+    const { node } = this.out({ gain: 0.9, drive: true });
+    this.tone(node, { f0: 62, f1: 28, dur: 0.6, gain: 1.0 });
+    this.noise(node, { type: 'highpass', f0: 3000, t: 0.12, dur: 0.18, gain: 0.35 });
   }
   click() {
     if (!this.ready) return;
