@@ -5,8 +5,8 @@ const URL = process.env.URL;
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   for (const profile of [{ name: 'this test machine', net: null }]) {
-    const ctx = await b.newContext({ viewport: { width: 1280, height: 720 } });
-    const p = await ctx.newPage();
+    const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 1280, height: 720 } });
+    const p = await ctx.newPage({ locale: 'ja-JP' });
     const cdp = await ctx.newCDPSession(p);
     await cdp.send('Network.enable');
     if (profile.net) await cdp.send('Network.emulateNetworkConditions', profile.net);

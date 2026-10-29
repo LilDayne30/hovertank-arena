@@ -7,7 +7,7 @@ const root = path.join(__dirname, '..', 'client');
 const srv = http.createServer((q, r) => { const f = path.join(root, q.url === '/' ? 'x' : q.url); if (q.url === '/') { r.setHeader('content-type', 'text/html'); r.end('<!doctype html><title>a</title>'); return; } fs.readFile(f, (e, d) => { if (e) { r.statusCode = 404; r.end(); } else { r.setHeader('content-type', 'text/javascript'); r.end(d); } }); }).listen(0, async () => {
   const port = srv.address().port;
   const b = await chromium.launch();
-  const p = await b.newPage();
+  const p = await b.newPage({ locale: 'ja-JP' });
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   await p.goto(`http://localhost:${port}/`);
   const res = await p.evaluate(async () => {

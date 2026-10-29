@@ -4,7 +4,7 @@ import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim, projectile, SHELL_KINDS,
 } from '../shared/sim.js';
 import { SIDEARMS, ULTS, SIDE, ULT, ULT_MAX, cleanLoadout } from '../shared/abilities.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel, qmLabel, normPhrase } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, normPhrase, BOT_LEVEL_NAMES } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -14,6 +14,7 @@ import { Profile } from './profile.js';
 import { setupProgressUi, titleName } from './progress-ui.js';
 import { DEFAULT_LOOK } from '../shared/progress.js';
 import { Sound } from './audio.js';
+import { t as tr, lang, setLang, onLang, initLang } from './i18n.js';
 
 // ------------------------------------------------------------------ config
 const ENDPOINT = location.origin;   // the Worker serves both the page and /api
@@ -58,6 +59,11 @@ const mats = {};
 const heal = { active: false, next: 0, e: null, tag: null };
 let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null, publicRoom = false;
 const sameTeam = (id) => rules.mode === 'team' && roster.get(id)?.team === myTeam;
+// rule labels in the current language ("個人戦・5分間" / "Free-for-all · 5 min")
+const SEP = () => (lang === 'en' ? ' · ' : '・');
+const goalT = (r) => (r.goal === 'kills' ? tr('{n}キル先取', { n: r.target }) : tr('5分間'));
+const qmLabelT = (r) => `${r.mode === 'team' ? tr('チーム戦（2対2）') : `${tr('個人戦')}${SEP()}${tr('{n}人', { n: r.size })}`}${SEP()}${goalT(r)}`;
+const rulesLabelT = (r) => `${tr(r.mode === 'team' ? 'チーム戦' : '個人戦')}${SEP()}${goalT(r)}${r.bots ? `${SEP()}${tr('CPU{n}（{l}）', { n: r.bots, l: tr(BOT_LEVEL_NAMES[r.botLevel] || 'ふつう') })}` : ''}`;
 // sidearm + special choice (kept on this device, sent to the room on join and on every change)
 let loadout = cleanLoadout(JSON.parse(store.get('ht-loadout') || 'null'));
 const loadoutPickers = [];
@@ -68,13 +74,18 @@ const abil = { sideReady: true, ultReady: false };
 window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; }, get app() { return app; } };
 
 // ------------------------------------------------------------------ boot
-init().catch((e) => { console.error(e); showLoading(false); $('lobby-status').textContent = `初期化に失敗しました: ${e.message}`; });
+init().catch((e) => { console.error(e); showLoading(false); $('lobby-status').textContent = tr('初期化に失敗しました: {m}', { m: e.message }); });
 
 async function init() {
   document.body.classList.toggle('touch', matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window);
+  initLang();
+  // language: one button in the lobby (top right) and one in settings; shows the language you switch TO
+  const paintLang = () => { for (const id of ['btn-lang', 'btn-lang2']) $(id).textContent = lang === 'en' ? '🌐 日本語' : '🌐 English'; };
+  for (const id of ['btn-lang', 'btn-lang2']) $(id).onclick = () => setLang(lang === 'en' ? 'ja' : 'en');
+  paintLang(); onLang(paintLang);
   $('name').value = store.get('ht-name') || '';
   const rid = params.get('r');
-  if (rid) { $('join-box').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
+  if (rid) { $('join-box').classList.remove('hidden'); $('btn-join').textContent = tr('部屋 {id} に参加', { id: rid }); }
   // lobby sheets (quick-match conditions, passphrase room, loadout): one open at a time, tap outside to close
   $('btn-qm-opts').onclick = () => openSheet('qm-sheet');
   $('tab-btn-phrase').onclick = () => { openSheet('phrase-sheet'); if (!input?.touchMode) setTimeout(() => $('phrase').focus(), 50); };
@@ -83,14 +94,15 @@ async function init() {
   document.querySelectorAll('.sheet .x-close').forEach((b) => { b.onclick = closeSheets; });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); });
   // rules for a new room (remembered); when opened from an invite, show the room's rules instead
-  const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
+  let lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
+  onLang(() => { lobbyRules = rulesPicker($('lobby-rules'), lobbyRules.get(), (r) => store.set('ht-rules', JSON.stringify(r))); settingsRules = rulesPicker($('settings-rules'), settingsRules.get(), () => {}); });
   // private match: passphrase (empty -> one is made up)
   $('phrase').value = store.get('ht-phrase') || '';
   $('btn-phrase-rand').onclick = () => { $('phrase').value = randomPhrase(); };
   $('phrase').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('btn-create').click(); });
   $('btn-create').onclick = () => {
     if (!$('phrase').value.trim()) $('phrase').value = randomPhrase();
-    if (!normPhrase($('phrase').value)) { $('lobby-status').textContent = '合言葉は2〜16文字にしてください。'; return; }
+    if (!normPhrase($('phrase').value)) { $('lobby-status').textContent = tr('合言葉は2〜16文字にしてください。'); return; }
     store.set('ht-phrase', $('phrase').value.trim());
     start('phrase', null, lobbyRules.get());
   };
@@ -106,8 +118,8 @@ async function init() {
   };
   // the chip above the play button says what you will get
   const paintQmSum = () => {
-    const size = qmMode === 'team' ? 4 : qmSize, mode = qmMode === 'team' ? 'チーム戦（2対2）' : `${qmMode === 'ffa' ? '個人戦' : 'どちらでも'}・${size}人`;
-    $('qm-sum-text').textContent = `${mode}・${qmGoal === 'kills' ? `${qmTarget}キル先取` : '5分間'}`;
+    const size = qmMode === 'team' ? 4 : qmSize, mode = qmMode === 'team' ? tr('チーム戦（2対2）') : `${tr(qmMode === 'ffa' ? '個人戦' : 'どちらでも')}${SEP()}${tr('{n}人', { n: size })}`;
+    $('qm-sum-text').textContent = `${mode}${SEP()}${goalT({ goal: qmGoal, target: qmTarget })}`;
   };
   document.querySelectorAll('#qm-mode [data-v]').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
   document.querySelectorAll('#qm-size button').forEach((b) => { b.onclick = () => { qmSize = Number(b.dataset.n); store.set('ht-qm-size', String(qmSize)); if (qmMode === 'team' && qmSize !== 4) qmMode = 'ffa'; paintQm(); }; });
@@ -123,10 +135,17 @@ async function init() {
   document.querySelectorAll('#qm-goal [data-g]').forEach((b) => { b.onclick = () => { qmGoal = b.dataset.g; paintGoal(); }; });
   goalSel.onchange = () => { qmTarget = Number(goalSel.value); qmGoal = 'kills'; paintGoal(); };
   paintQm(); paintGoal();
+  onLang(paintQmSum);
   $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize, qmGoal, qmTarget);
-  if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
+  if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? tr('この部屋：クイックマッチ・{r}', { r: qmLabelT(i.rules) }) : tr('この部屋のルール：{r}（{n}/4人）', { r: rulesLabelT(i.rules), n: i.players }); }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   loadoutPicker($('loadout-picker'));
+  onLang(() => { loadoutPickers.length = 0; loadoutPicker($('loadout-picker')); });
+  onLang(() => {   // texts the code set before the switch
+    if (rid && !room) $('btn-join').textContent = tr('部屋 {id} に参加', { id: rid });
+    if (room) { $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); updateBoard(); for (const v of tanks.values()) v.tagKey = null; }
+    $('btn-copy').textContent = tr('コピー');
+  });
   // tap an ability icon to change just that one; from settings both are shown
   $('btn-loadout').onclick = () => openLoadout('side');
   $('btn-lo-ult').onclick = () => openLoadout('ult');
@@ -149,7 +168,7 @@ async function init() {
   if (DEBUG) window.__ht.fxKill = (style, d = 16) => {   // debug: play a kill (effect + hit stop) in front of the camera
     const p = camera.getPosition(), f = camera.forward, x = p.x + f.x * d, z = p.z + f.z * d, gy = heightAt(world, x, z);
     fx.killStyle(x, gy + C.hoverHeight, z, mats.slotLit[1], style, { groundY: gy, big: true });
-    hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; centerFlash('撃破！', 1200, true);
+    hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; centerFlash(tr('撃破！'), 1200, true);
   };
   if (DEBUG) window.__ht.spin = (yaw) => { preview.held = yaw != null; if (yaw != null) { preview.yaw = yaw; preview.spin = 0; } };   // debug: hold the showcase tank at an angle (screenshots)
   if (DEBUG) window.__ht.preview = (look) => { preview.look = look ? { ...DEFAULT_LOOK, ...look } : null; if (preview.v) removeTank('__preview'); $('lobby').classList.toggle('hidden', !!look); };
@@ -166,7 +185,7 @@ async function init() {
   }).catch(() => { pwa.setReachable(false); });
   showStats(); setInterval(() => { if (!room) showStats(); }, 15000);
   window.addEventListener('online', showStats);
-  showLoading(true, '読み込み中…');
+  showLoading(true, tr('読み込み中…'));
   await setupEngine();
   showLoading(false);
   window.__ht.readyAt = performance.now();
@@ -269,18 +288,18 @@ function wireUi() {
   $('sens').oninput = (e) => setSens(parseFloat(e.target.value));
   $('btn-settings').onclick = () => { document.exitPointerLock?.(); settingsRules.set(rules); $('btn-team').classList.toggle('hidden', rules.mode !== 'team');
     $('settings-rules').classList.toggle('hidden', publicRoom); $('public-note').classList.toggle('hidden', !publicRoom);
-    $('btn-newgame').textContent = $('btn-newgame').dataset.label = publicRoom ? 'ニューゲーム' : 'このルールでニューゲーム'; $('settings').classList.remove('hidden'); };
+    $('btn-newgame').textContent = $('btn-newgame').dataset.label = tr(publicRoom ? 'ニューゲーム' : 'このルールでニューゲーム'); $('settings').classList.remove('hidden'); };
   $('btn-settings-close').onclick = () => $('settings').classList.add('hidden');
   $('btn-invite').onclick = () => { document.exitPointerLock?.(); showInvite(); };
   $('btn-invite-close').onclick = () => $('invite').classList.add('hidden');
   $('btn-copy').onclick = async () => {
     const v = myPhrase || $('invite-url').value;
-    try { await navigator.clipboard.writeText(v); $('btn-copy').textContent = 'コピーしました'; } catch { $('invite-url').select(); document.execCommand?.('copy'); }
-    setTimeout(() => { $('btn-copy').textContent = 'コピー'; }, 1500);
+    try { await navigator.clipboard.writeText(v); $('btn-copy').textContent = tr('コピーしました'); } catch { $('invite-url').select(); document.execCommand?.('copy'); }
+    setTimeout(() => { $('btn-copy').textContent = tr('コピー'); }, 1500);
   };
   $('btn-share').onclick = () => navigator.share?.(myPhrase
-    ? { title: 'Hover Tank Arena', text: `Hover Tank Arenaで一緒に対戦しよう！ ロビーの「合言葉」に「${myPhrase}」と入れてね`, url: `${location.origin}${location.pathname}` }
-    : { title: 'Hover Tank Arena', text: '一緒に対戦しよう', url: $('invite-url').value }).catch(() => {});
+    ? { title: 'Hover Tank Arena', text: tr('Hover Tank Arenaで一緒に対戦しよう！ ロビーの「合言葉」に「{p}」と入れてね', { p: myPhrase }), url: `${location.origin}${location.pathname}` }
+    : { title: 'Hover Tank Arena', text: tr('一緒に対戦しよう'), url: $('invite-url').value }).catch(() => {});
   if (!navigator.share) $('btn-share').classList.add('hidden');
   $('btn-fullscreen').onclick = async () => {
     try { await document.documentElement.requestFullscreen?.(); await screen.orientation?.lock?.('landscape'); } catch { /* not supported (iOS Safari) */ }
@@ -289,7 +308,7 @@ function wireUi() {
   let armed = 0;
   const newGame = (btn) => () => {
     if (!room) return;
-    if (performance.now() - armed > 3000) { armed = performance.now(); btn.textContent = 'もう一度押すとリセット'; setTimeout(() => { btn.textContent = btn.dataset.label; }, 3000); return; }
+    if (performance.now() - armed > 3000) { armed = performance.now(); btn.textContent = tr('もう一度押すとリセット'); setTimeout(() => { btn.textContent = btn.dataset.label; }, 3000); return; }
     armed = 0; btn.textContent = btn.dataset.label;
     room.send('newgame', btn.id === 'btn-newgame' ? { rules: settingsRules.get() } : 1);
   };
@@ -317,14 +336,15 @@ function setupSound() {
 let myPhrase = '';   // passphrase of the private room you are in ('' = quick match / old invite link)
 function showInvite() {
   $('invite-url').value = `${location.origin}${location.pathname}?r=${room.roomId}`;
-  $('invite-h').textContent = myPhrase ? '合言葉' : '招待URL';
+  $('invite-h').textContent = tr(myPhrase ? '合言葉' : '招待URL');
   $('invite-phrase').textContent = myPhrase;
   $('invite-phrase-box').classList.toggle('hidden', !myPhrase);
   $('invite-url-box').classList.toggle('hidden', !!myPhrase);
   $('invite').classList.remove('hidden');
 }
 const PHRASE_WORDS = ['たこ', 'いか', 'ねこ', 'うに', 'くま', 'そら', 'ほし', 'もち', 'かぜ', 'ゆき', 'つき', 'はな', 'さめ', 'きつね', 'たぬき', 'かに'];
-function randomPhrase() { return `${PHRASE_WORDS[Math.floor(Math.random() * PHRASE_WORDS.length)]}${10 + Math.floor(Math.random() * 90)}`; }
+const PHRASE_WORDS_EN = ['taco', 'squid', 'cat', 'urchin', 'bear', 'sky', 'star', 'mochi', 'wind', 'snow', 'moon', 'bloom', 'shark', 'fox', 'tanuki', 'crab'];
+function randomPhrase() { const w = lang === 'en' ? PHRASE_WORDS_EN : PHRASE_WORDS; return `${w[Math.floor(Math.random() * w.length)]}${10 + Math.floor(Math.random() * 90)}`; }
 // ------------------------------------------------------------------ lobby sheets & showcase
 function openSheet(id) {
   closeSheets();
@@ -339,7 +359,7 @@ function closeSheets() {
 function openLoadout(slot) {
   const el = $('loadout');
   if (slot) el.dataset.only = slot; else delete el.dataset.only;
-  $('lo-title').textContent = slot === 'side' ? 'サイドアームを選ぶ' : slot === 'ult' ? '必殺技を選ぶ' : '装備';
+  $('lo-title').textContent = tr(slot === 'side' ? 'サイドアームを選ぶ' : slot === 'ult' ? '必殺技を選ぶ' : '装備');
   openSheet('loadout');
 }
 // drag the lobby tank to spin it (mouse or finger); it keeps turning slowly on its own
@@ -365,14 +385,14 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', q
   const name = $('name').value.trim().slice(0, 12);
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
-  showLoading(true, 'サーバーに接続中…');
+  showLoading(true, tr('サーバーに接続中…'));
   try {
     let id = rid;
     if (mode === 'quick') {
       // a seat can be taken by someone else between matching and joining: try another room then
       const tried = [];
       for (let attempt = 0; attempt < 4; attempt++) {
-        showLoading(true, attempt ? '別の部屋を探しています…' : '対戦相手を探しています…');
+        showLoading(true, tr(attempt ? '別の部屋を探しています…' : '対戦相手を探しています…'));
         id = await quickMatch(ENDPOINT, qmMode, tried, qmSize, qmGoal, qmTarget);
         room = new Room(ENDPOINT, id);
         room.quick = true;
@@ -399,9 +419,9 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', q
   } catch (e) {
     showLoading(false);
     const code = e?.code || '';
-    $('lobby-status').textContent = code === 'full' ? 'この部屋は満室です（最大4人）。'
-      : code === 'notfound' ? '部屋が見つかりません。URLが違うか、部屋が削除された可能性があります。'
-        : `接続できませんでした: ${e?.message || e}`;
+    $('lobby-status').textContent = code === 'full' ? tr('この部屋は満室です（最大4人）。')
+      : code === 'notfound' ? tr('部屋が見つかりません。URLが違うか、部屋が削除された可能性があります。')
+        : tr('接続できませんでした: {m}', { m: e?.message || e });
     room = null;
     return;
   }
@@ -414,11 +434,11 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', q
   document.body.classList.add('playing');
   input.enabled = true;
   if (mode === 'phrase') {
-    if (phraseJoin.created) { showInvite(); notice(`合言葉「${escapeHtml(phraseJoin.raw)}」の部屋を作りました`); }
-    else notice(`合言葉「${escapeHtml(phraseJoin.raw)}」の部屋に参加しました（${rulesLabel(phraseJoin.rules)}）`);
+    if (phraseJoin.created) { showInvite(); notice(tr('合言葉「{p}」の部屋を作りました', { p: escapeHtml(phraseJoin.raw) })); }
+    else notice(tr('合言葉「{p}」の部屋に参加しました（{r}）', { p: escapeHtml(phraseJoin.raw), r: rulesLabelT(phraseJoin.rules) }));
   }
-  if (mode === 'quick') notice('クイックマッチ：対戦に参加しました');
-  if (!input.touchMode) $('center-msg').textContent = 'クリックで操作開始';
+  if (mode === 'quick') notice(tr('クイックマッチ：対戦に参加しました'));
+  if (!input.touchMode) $('center-msg').textContent = tr('クリックで操作開始');
   setInterval(() => room?.send('ping', performance.now()), 2000);
 }
 
@@ -429,7 +449,7 @@ function bindRoom(r) {
     r.send('loadout', loadout);
     myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public;
     myPhrase = m.phrase ? (store.sget(`ht-phrase-${r.roomId}`) || m.phrase) : '';
-    $('btn-invite').textContent = myPhrase ? '合言葉' : '招待'; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+    $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
@@ -445,7 +465,7 @@ function bindRoom(r) {
   r.onMessage('result', showResult);
   r.onMessage('prog', (res) => { if (DEBUG) (window.__ht.progs ??= []).push(res); profile.applyProgress(res); pui.showMatchProgress(res); if (res?.after && res.before && res.after.level > res.before.level) setTimeout(() => sound.levelUp(), 900); });
   r.onMessage('pong', (t) => { ping = ping ? ping * 0.7 + (performance.now() - t) * 0.3 : performance.now() - t; });
-  r.onDrop(() => { banner('接続が切れました。再接続中…'); input.reset(); });
+  r.onDrop(() => { banner(tr('接続が切れました。再接続中…')); input.reset(); });
   r.onReconnect(() => { banner(''); store.sset(`ht-token-${r.roomId}`, r.reconnectionToken); local.spawnId = -1; });
   r.onLeave(() => {
     banner('');
@@ -454,9 +474,9 @@ function bindRoom(r) {
     $('center-msg').textContent = '';
     $('lobby').classList.remove('hidden');
     $('join-box').classList.remove('hidden'); $('lobby-room-rules').textContent = '';
-    $('btn-join').textContent = 'もう一度参加';
+    $('btn-join').textContent = tr('もう一度参加');
     $('btn-join').onclick = () => location.reload();
-    $('lobby-status').textContent = `サーバーとの接続が切れました（${RECONNECT_SECONDS}秒以内の再接続に失敗）。`;
+    $('lobby-status').textContent = tr('サーバーとの接続が切れました（{s}秒以内の再接続に失敗）。', { s: RECONNECT_SECONDS });
   });
 }
 
@@ -487,15 +507,15 @@ function onSnapshot(m) {
     if (DEBUG && !["boost"].includes(e.t)) (window.__ev ??= []).push(`${e.t}:${e.k || ""}:${e.v || ""}:${e.d || ""}`);
     if (e.t === 'hit' && e.o === myId) { flashHitmark(); sound.hitConfirm(); }
     if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); sound.hurt(); }
-    if (e.t === 'team' && e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が${TEAM_NAMES[e.team]}に移動`);
+    if (e.t === 'team' && e.v !== myId) notice(tr('{n} が{t}に移動', { n: escapeHtml(nameOf(e.v)), t: tr(TEAM_NAMES[e.team]) }));
     if (e.t === 'newgame') {
       sound.horn();
-      notice(`${escapeHtml(nameOf(e.by))} がニューゲームを開始しました（${publicRoom ? qmLabel(e.rules || rules) : rulesLabel(e.rules || rules)}）`);
+      notice(tr('{n} がニューゲームを開始しました（{r}）', { n: escapeHtml(nameOf(e.by)), r: publicRoom ? qmLabelT(e.rules || rules) : rulesLabelT(e.rules || rules) }));
       $('result').classList.add('hidden'); $('settings').classList.add('hidden');
       local.spawnId = -1;
     }
-    if (e.t === 'healspawn') notice('中央の丘に回復アイテムが出現！');
-    if (e.t === 'heal' && e.v === myId) { centerFlash('全回復！', 1000, true); flashHeal(); }
+    if (e.t === 'healspawn') notice(tr('中央の丘に回復アイテムが出現！'));
+    if (e.t === 'heal' && e.v === myId) { centerFlash(tr('全回復！'), 1000, true); flashHeal(); }
     if (e.t === 'reflect') { reflected.add(e.s); if (reflected.size > 200) reflected.clear(); }
     pendingEvents.push({ k: s.k, e });
   }
@@ -503,11 +523,11 @@ function onSnapshot(m) {
   sound.setMusic(phase === 'play' ? 'battle' : 'result', phase === 'play' && rules.goal === 'time' && s.tl <= 30);
   teamKills = m.tk || [0, 0];
   waitLeft = s.ph === 'wait' ? s.tl : 0;
-  $('timer').textContent = s.ph === 'wait' ? 'マッチング中' : rules.goal === 'kills' ? `${rules.target}キル先取` : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
+  $('timer').textContent = s.ph === 'wait' ? tr('マッチング中') : rules.goal === 'kills' ? tr('{n}キル先取', { n: rules.target }) : `${Math.floor(s.tl / 60)}:${String(s.tl % 60).padStart(2, '0')}`;
   $('teamscore').classList.toggle('hidden', rules.mode !== 'team');
   if (rules.mode === 'team') $('teamscore').innerHTML = `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${teamKills[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${teamKills[1]} ${TEAM_NAMES[1]}</span>`;
   heal.active = s.hl; heal.next = s.hn;
-  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? '✚ 回復アイテム 出現中（中央の丘）' : `✚ 回復まで ${s.hn}秒`;
+  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? tr('✚ 回復アイテム 出現中（中央の丘）') : tr('✚ 回復まで {n}秒', { n: s.hn });
   $('heal-ind').classList.toggle('on', s.hl);
   updateBoardScores(s);
 
@@ -645,7 +665,7 @@ function localSide(t, ev, gy) {
 }
 function localUlt(t, ev, gy) {
   const U = ULT[ev.ult];
-  centerFlash(`${U.icon} ${U.name}`, 900, true);
+  centerFlash(`${U.icon} ${tr(U.name)}`, 900, true);
   if (ev.ult === 'overdrive') { fx.overdriveStart(t.x, gy, t.z, true); sound.overdrive(null, true); fovKick = 8; }
   else if (ev.ult === 'mega') { fireLocalShell(t, 'mega', ev.ultSeq); fx.addShake(0.4); fovKick = -6; }
   else if (ev.ult === 'strike') sound.strikeCall(null, true, false);
@@ -715,7 +735,7 @@ function makeHealPickup() {
   heal.e = g; heal.cross = cross; heal.ring = ring;
   const tag = document.createElement('div');
   tag.className = 'tag heal-tag';
-  tag.textContent = '✚ 回復';
+  tag.textContent = tr('✚ 回復'); onLang(() => { tag.textContent = tr('✚ 回復'); });
   $('tags').appendChild(tag);
   heal.tag = tag;
 }
@@ -908,7 +928,7 @@ function renderRemote(rt) {
     v.grounded = src.grounded;
     placeTank(v, x, y, z, yaw, ay, pb.vx, pb.vz, vis, pb.invuln, now);
     v.hp = pb.hp;
-    v.name = r?.name || '';
+    v.name = shownName(r);
   }
   for (const id of tanks.keys()) if (id !== myId && !b.players.has(id)) removeTank(id);
 
@@ -977,7 +997,7 @@ function flushEvents(rt) {
       fx.healBurst(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
       sound.heal(HEAL_POS, e.v === myId);
       const v = tanks.get(e.v); if (v) v.healFlash = 1;
-      if (e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が回復した`);
+      if (e.v !== myId) notice(tr('{n} が回復した', { n: escapeHtml(nameOf(e.v)) }));
     } else if (e.t === 'boost') {
       if (e.v !== myId) { const v = tanks.get(e.v); if (v && v.visible) { fx.boostBurst(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, e.l); sound.boost(v.pos, false, e.l); } }
     } else if (e.t === 'kill') {
@@ -986,8 +1006,8 @@ function flushEvents(rt) {
       fx.killStyle(e.x, e.y, e.z, vt?.mats?.[0] || mats.slotLit[(roster.get(e.v)?.slot ?? 0) % 4], roster.get(e.k)?.look?.boom, { groundY: heightAt(world, e.x, e.z), big: mine || me });
       feed(e.k, e.v);
       sound.kill(e, mine, me);
-      if (me) { centerFlash('撃破された…', 1800); hitStop(180); screenFlash('death'); sound.impact(); fovKick = 10; }
-      else if (mine) { centerFlash('撃破！', 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; }
+      if (me) { centerFlash(tr('撃破された…'), 1800); hitStop(180); screenFlash('death'); sound.impact(); fovKick = 10; }
+      else if (mine) { centerFlash(tr('撃破！'), 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; }
     }
   }
 }
@@ -1007,7 +1027,7 @@ function abilityEvent(e) {
     case 'ult': {
       if (me) return true;
       const U = ULT[e.k];
-      if (U) notice(`<span style="color:${colorCss(roster.get(e.v)?.slot ?? 0)}">${escapeHtml(nameOf(e.v))}</span> の必殺技　${U.icon} ${U.name}`);
+      if (U) notice(tr('{n} の必殺技　{s}', { n: `<span style="color:${colorCss(roster.get(e.v)?.slot ?? 0)}">${escapeHtml(nameOf(e.v))}</span>`, s: `${U.icon} ${tr(U.name)}` }));
       if (!v?.visible) return true;
       const gy = v.pos.y - C.hoverHeight;
       if (e.k === 'overdrive') { fx.overdriveStart(v.pos.x, gy, v.pos.z); sound.overdrive(v.pos, false); }
@@ -1016,8 +1036,8 @@ function abilityEvent(e) {
     }
     case 'reflect': {
       fx.reflectBurst(e.x, e.y, e.z); sound.reflect(e, me);
-      if (e.o === myId) { killLocalShell(e.q, false); centerFlash('はね返された！', 900); }
-      if (me) { centerFlash('ジャストガード！', 1000, true); fx.addShake(0.3); }
+      if (e.o === myId) { killLocalShell(e.q, false); centerFlash(tr('はね返された！'), 900); }
+      if (me) { centerFlash(tr('ジャストガード！'), 1000, true); fx.addShake(0.3); }
       return true;
     }
     case 'rico': if (e.o !== myId || reflected.has(e.s)) { fx.rico(e.x, e.y, e.z); sound.rico(e); } return true;
@@ -1231,7 +1251,9 @@ function updateLocalShells(dt) {
 
 // ------------------------------------------------------------------ HUD
 function colorCss(slot) { const c = PLAYER_COLORS[slot % 4]; return `rgb(${c.map((v) => Math.round(v * 255)).join(',')})`; }
-function nameOf(id) { const r = roster.get(id); return r ? r.name : '???'; }
+const BOT_EN = { レイ: 'Rei', ガロ: 'Garo', ミナ: 'Mina', ジン: 'Jin', ルカ: 'Luka', ソラ: 'Sora', ハク: 'Haku', ユズ: 'Yuzu' };
+const shownName = (r) => (lang === 'en' && r?.bot && BOT_EN[r.name] ? BOT_EN[r.name] : r?.name ?? '');
+function nameOf(id) { const r = roster.get(id); return r ? shownName(r) : '???'; }
 let lastScores = new Map();
 function updateBoardScores(s) {
   lastScores = new Map([...s.players].map(([id, p]) => [id, p.kills]));
@@ -1239,15 +1261,15 @@ function updateBoardScores(s) {
 }
 function updateBoard() {
   const byKills = (a, b) => (lastScores.get(b.id) || 0) - (lastScores.get(a.id) || 0);
-  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${r.bot ? '<span class="cpu">CPU</span>' : r.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r.look?.emblem, 12)}${escapeHtml(r.name)} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : ' (切断中)'}</div>`;
+  const row = (r) => `<div class="${r.id === myId ? 'me' : ''} ${r.connected ? '' : 'off'}"><span class="dot" style="background:${colorCss(r.slot)}"></span>${r.bot ? '<span class="cpu">CPU</span>' : r.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r.look?.emblem, 12)}${escapeHtml(shownName(r))} <b>${lastScores.get(r.id) || 0}</b>${r.connected ? '' : tr(' (切断中)')}</div>`;
   let html;
   if (rules.mode === 'team') {
     html = [0, 1].map((t) => {
       const members = [...roster.values()].filter((r) => (r.team ?? 0) === t).sort(byKills);
-      return `<div class="team-h" style="color:${rgb(TEAM_COLORS[t])}">${TEAM_NAMES[t]} <b>${teamKills[t]}</b>${t === myTeam ? '（味方）' : ''}</div>${members.map(row).join('') || '<div class="off">―</div>'}`;
+      return `<div class="team-h" style="color:${rgb(TEAM_COLORS[t])}">${tr(TEAM_NAMES[t])} <b>${teamKills[t]}</b>${t === myTeam ? tr('（味方）') : ''}</div>${members.map(row).join('') || '<div class="off">―</div>'}`;
     }).join('');
   } else html = [...roster.values()].sort(byKills).map(row).join('');
-  html = `<div class="rules-h">${publicRoom ? `クイックマッチ・${qmLabel(rules)}` : rulesLabel(rules)}</div>${html}`;
+  html = `<div class="rules-h">${publicRoom ? tr('クイックマッチ・{r}', { r: qmLabelT(rules) }) : rulesLabelT(rules)}</div>${html}`;
   if ($('board').innerHTML !== html) $('board').innerHTML = html;
 }
 // HUD text for team colours is lightened so it stays readable on the bright desert
@@ -1262,11 +1284,11 @@ function setRules(r) {
 function rulesPicker(el, initial, onChange) {
   let cur = cleanRules(initial);
   el.innerHTML = `
-    <div class="row"><span class="lbl">モード</span><button data-k="mode" data-v="ffa" type="button">個人戦</button><button data-k="mode" data-v="team" type="button">チーム戦</button></div>
-    <div class="row"><span class="lbl">勝利条件</span><button data-k="goal" data-v="time" type="button">5分間で多く倒す</button><button data-k="goal" data-v="kills" type="button">先に</button>
-      <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">キル</span></div>
-    <div class="row"><span class="lbl">CPU</span>${[0, 1, 2, 3].map((n) => `<button data-k="bots" data-v="${n}" type="button">${n ? `${n}体` : 'なし'}</button>`).join('')}</div>
-    <div class="row cpu-lv"><span class="lbl">CPUの強さ</span><button data-k="botLevel" data-v="easy" type="button">よわい</button><button data-k="botLevel" data-v="normal" type="button">ふつう</button><button data-k="botLevel" data-v="hard" type="button">つよい</button></div>`;
+    <div class="row"><span class="lbl">${tr('モード')}</span><button data-k="mode" data-v="ffa" type="button">${tr('個人戦')}</button><button data-k="mode" data-v="team" type="button">${tr('チーム戦')}</button></div>
+    <div class="row"><span class="lbl">${tr('勝利条件')}</span><button data-k="goal" data-v="time" type="button">${tr('5分間で多く倒す')}</button><button data-k="goal" data-v="kills" type="button">${tr('先に')}</button>
+      <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">${tr('キル')}</span></div>
+    <div class="row"><span class="lbl">CPU</span>${[0, 1, 2, 3].map((n) => `<button data-k="bots" data-v="${n}" type="button">${n ? tr('{n}体', { n }) : tr('なし')}</button>`).join('')}</div>
+    <div class="row cpu-lv"><span class="lbl">${tr('CPUの強さ')}</span><button data-k="botLevel" data-v="easy" type="button">${tr('よわい')}</button><button data-k="botLevel" data-v="normal" type="button">${tr('ふつう')}</button><button data-k="botLevel" data-v="hard" type="button">${tr('つよい')}</button></div>`;
   const paint = () => {
     el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(String(cur[b.dataset.k]) === b.dataset.v)));
     el.querySelector('.cpu-lv').classList.toggle('hidden', !cur.bots);   // strength only matters with CPUs
@@ -1301,15 +1323,15 @@ function flashDamage() { const h = $('damage'); h.classList.add('on'); setTimeou
 function showResult(res) {
   const list = Array.isArray(res) ? res : res.list;
   const w = res.winner || {};
-  const title = w.draw ? '引き分け' : w.team !== undefined ? `${TEAM_NAMES[w.team]}の勝利！` : w.id ? `${escapeHtml(nameOf(w.id))} の勝利！` : '試合終了';
+  const title = w.draw ? tr('引き分け') : w.team !== undefined ? tr('{t}の勝利！', { t: tr(TEAM_NAMES[w.team]) }) : w.id ? tr('{n} の勝利！', { n: escapeHtml(nameOf(w.id)) }) : tr('試合終了');
   const mine = w.team !== undefined ? w.team === myTeam : w.id === myId;
   sound.matchEnd(w.draw ? 'draw' : mine ? 'win' : 'lose');
-  $('result-title').innerHTML = title + (w.draw ? '' : mine ? '<small>（あなたの勝ち）</small>' : '');
+  $('result-title').innerHTML = title + (w.draw ? '' : mine ? `<small>${tr('（あなたの勝ち）')}</small>` : '');
   $('result-teams').innerHTML = res.teams ? `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${res.teams[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${res.teams[1]} ${TEAM_NAMES[1]}</span>` : '';
   const ol = $('result-list');
-  ol.innerHTML = list.map((p) => { const r = roster.get(p.id); return `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${r?.bot ? '<small class="cpu">CPU</small> ' : r?.lv ? `<small>Lv${r.lv}</small> ` : ''}${emblemSvg(r?.look?.emblem, 14)}${escapeHtml(p.name)} — ${p.kills} 撃破 / ${p.deaths} 被撃破</li>`; }).join('');
+  ol.innerHTML = list.map((p) => { const r = roster.get(p.id); return `<li><span class="dot" style="background:${colorCss(p.slot)}"></span>${r?.bot ? '<small class="cpu">CPU</small> ' : r?.lv ? `<small>Lv${r.lv}</small> ` : ''}${emblemSvg(r?.look?.emblem, 14)}${escapeHtml(r ? shownName(r) : p.name)} — ${tr('{k} 撃破 / {d} 被撃破', { k: p.kills, d: p.deaths })}</li>`; }).join('');
   pui.clearMatchProgress();
-  $('result-next').textContent = '10秒後に次の試合が始まります';
+  $('result-next').textContent = tr('10秒後に次の試合が始まります');
   $('result').classList.remove('hidden');
   document.exitPointerLock?.();
 }
@@ -1327,12 +1349,12 @@ function updateHud(dt) {
   g.dataset.lvl = ch >= C.charge2 ? '2' : ch >= C.charge1 ? '1' : '0';
   updateAbilityHud(t);
   $('shield-msg').classList.toggle('hidden', !(local.alive && local.invuln));
-  if (local.alive && local.invuln) $('shield-msg').textContent = `無敵 ${local.invulnLeft.toFixed(1)}秒（撃つと解除）`;
+  if (local.alive && local.invuln) $('shield-msg').textContent = tr('無敵 {s}秒（撃つと解除）', { s: local.invulnLeft.toFixed(1) });
   if (performance.now() > centerUntil) {
     let msg = '';
-    if (phase === 'wait') msg = `対戦相手を探しています… ${waitLeft}\n（そのあいだ自由に走れます）`;
-    else if (!local.alive && myId && phase === 'play') msg = `リスポーンまで ${local.respawnIn.toFixed(1)} 秒`;
-    else if (!input.touchMode && document.pointerLockElement !== $('game') && $('settings').classList.contains('hidden') && $('invite').classList.contains('hidden') && phase === 'play') msg = 'クリックで操作開始';
+    if (phase === 'wait') msg = tr('対戦相手を探しています… {n}\n（そのあいだ自由に走れます）', { n: waitLeft });
+    else if (!local.alive && myId && phase === 'play') msg = tr('リスポーンまで {s} 秒', { s: local.respawnIn.toFixed(1) });
+    else if (!input.touchMode && document.pointerLockElement !== $('game') && $('settings').classList.contains('hidden') && $('invite').classList.contains('hidden') && phase === 'play') msg = tr('クリックで操作開始');
     $('center-msg').textContent = msg;
     $('center-msg').classList.remove('pop');
   }
@@ -1359,29 +1381,30 @@ function updateAbilityHud(t) {
   const pct = `${Math.floor(ultK * 100)}%`, pe = $('ab-ult').querySelector('.pct'); if (pe.textContent !== pct) pe.textContent = pct;
   // ready pings (not on respawn / match start)
   if (sideReady && !abil.sideReady) sound.readyPing('side');
-  if (ultReady && !abil.ultReady) { sound.readyPing('ult'); notice(`必殺技 ${U.icon} ${U.name} READY（${input.touchMode ? 'SPボタン' : 'Qキー'}）`); }
+  if (ultReady && !abil.ultReady) { sound.readyPing('ult'); notice(tr('必殺技 {s} READY（{k}）', { s: `${U.icon} ${tr(U.name)}`, k: tr(input.touchMode ? 'SPボタン' : 'Qキー') })); }
   abil.sideReady = sideReady || !live; abil.ultReady = ultReady || (!live && abil.ultReady);
 }
 
 // sidearm / special chooser (the lobby and the settings panel share one state)
 function loadoutPicker(el) {
-  const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b><span>${a.name}</span><small>${k === 'side' ? `${a.cd}秒` : ''}</small></button>`;
-  el.innerHTML = `<div class="lo-grp grp-side"><div class="lo-h">サイドアーム <small>（${document.body.classList.contains('touch') ? 'SUBボタン' : 'Eキー'}・クールダウン制）</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p></div>
-    <div class="lo-grp grp-ult"><div class="lo-h">必殺技 <small>（${document.body.classList.contains('touch') ? 'SPボタン' : 'Qキー'}・ゲージ満タンで使える）</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p></div>`;
+  const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b><span>${tr(a.name)}</span><small>${k === 'side' ? tr('{n}秒', { n: a.cd }) : ''}</small></button>`;
+  const touchUi = document.body.classList.contains('touch');
+  el.innerHTML = `<div class="lo-grp grp-side"><div class="lo-h">${tr('サイドアーム')} <small>${tr('（{k}・クールダウン制）', { k: tr(touchUi ? 'SUBボタン' : 'Eキー') })}</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p></div>
+    <div class="lo-grp grp-ult"><div class="lo-h">${tr('必殺技')} <small>${tr('（{k}・ゲージ満タンで使える）', { k: tr(touchUi ? 'SPボタン' : 'Qキー') })}</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p></div>`;
   const paint = () => {
     el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(loadout[b.dataset.k] === b.dataset.v)));
     const S = SIDE[loadout.side], U = ULT[loadout.ult];
-    el.querySelector('[data-d="side"]').innerHTML = `${escapeHtml(S.desc)}（クールダウン${S.cd}秒）<em>コツ：${escapeHtml(S.tip)}</em>`;
-    el.querySelector('[data-d="ult"]').innerHTML = `${escapeHtml(U.desc)}<em>コツ：${escapeHtml(U.tip)}</em>`;
+    el.querySelector('[data-d="side"]').innerHTML = `${escapeHtml(tr(S.desc))}${tr('（クールダウン{n}秒）', { n: S.cd })}<em>${tr('コツ：{t}', { t: escapeHtml(tr(S.tip)) })}</em>`;
+    el.querySelector('[data-d="ult"]').innerHTML = `${escapeHtml(tr(U.desc))}<em>${tr('コツ：{t}', { t: escapeHtml(tr(U.tip)) })}</em>`;
   };
   // compact summaries (lobby / settings buttons that open this picker)
   const paintSummary = () => {
     const touch = document.body.classList.contains('touch'), S = SIDE[loadout.side], U = ULT[loadout.ult];
-    const html = `<span class="lo-i"><b>${S.icon}</b><span class="lo-n">${S.name}</span><kbd>${touch ? 'SUB' : 'E'}</kbd></span><span class="lo-i"><b>${U.icon}</b><span class="lo-n">${U.name}</span><kbd>${touch ? 'SP' : 'Q'}</kbd></span><span class="lo-edit">変更</span>`;
+    const html = `<span class="lo-i"><b>${S.icon}</b><span class="lo-n">${tr(S.name)}</span><kbd>${touch ? 'SUB' : 'E'}</kbd></span><span class="lo-i"><b>${U.icon}</b><span class="lo-n">${tr(U.name)}</span><kbd>${touch ? 'SP' : 'Q'}</kbd></span><span class="lo-edit">${tr('変更')}</span>`;
     document.querySelectorAll('.lo-sum').forEach((e) => { e.innerHTML = html; });
     // lobby: one big icon per slot
-    $('btn-loadout').innerHTML = `<b class="ic">${S.icon}</b><span class="tx"><small>サイドアーム</small><span class="nm">${S.name}</span></span><kbd>${touch ? 'SUB' : 'E'}</kbd>`;
-    $('btn-lo-ult').innerHTML = `<b class="ic">${U.icon}</b><span class="tx"><small>必殺技</small><span class="nm">${U.name}</span></span><kbd>${touch ? 'SP' : 'Q'}</kbd>`;
+    $('btn-loadout').innerHTML = `<b class="ic">${S.icon}</b><span class="tx"><small>${tr('サイドアーム')}</small><span class="nm">${tr(S.name)}</span></span><kbd>${touch ? 'SUB' : 'E'}</kbd>`;
+    $('btn-lo-ult').innerHTML = `<b class="ic">${U.icon}</b><span class="tx"><small>${tr('必殺技')}</small><span class="nm">${tr(U.name)}</span></span><kbd>${touch ? 'SP' : 'Q'}</kbd>`;
   };
   loadoutPickers.push(paintSummary);
   paintSummary();
@@ -1409,7 +1432,7 @@ function updateTags() {
     v.tag.style.display = 'block';
     v.tag.style.left = `${tmp.x}px`; v.tag.style.top = `${tmp.y}px`;
     const r = roster.get(id);
-    const tk = `${ally}|${v.name}|${r?.lv}|${r?.bot}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}|${r?.lo?.side}|${r?.lo?.ult}`;
+    const tk = `${ally}|${v.name}|${r?.lv}|${r?.bot}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}|${r?.lo?.side}|${r?.lo?.ult}|${lang}`;
     if (v.tagKey !== tk) {
       v.tagKey = tk;
       v.tag.className = `tag frame-${r?.look?.frame || 'none'}${ally ? ' ally' : ''}`;

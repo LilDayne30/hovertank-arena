@@ -11,7 +11,7 @@ const looks = [
 ];
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const p = await (await b.newContext({ viewport: { width: 640, height: 400 } })).newPage();
+  const p = await (await b.newContext({ locale: 'ja-JP', viewport: { width: 640, height: 400 } })).newPage({ locale: 'ja-JP' });
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   await p.goto(process.env.URL + '/?debug'); await p.waitForFunction(() => window.__ht && window.__ht.readyAt, null, { timeout: 30000 });
   for (let i = 0; i < looks.length; i++) {

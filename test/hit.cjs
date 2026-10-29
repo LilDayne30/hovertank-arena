@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 (async () => {
   const URL = process.env.URL;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const mk = async () => { const c = await b.newContext({ viewport: { width: 640, height: 360 } }); const p = await c.newPage(); return p; };
+  const mk = async () => { const c = await b.newContext({ locale: 'ja-JP', viewport: { width: 640, height: 360 } }); const p = await c.newPage({ locale: 'ja-JP' }); return p; };
   const A = await mk();
   await A.goto(URL + '/?debug', { waitUntil: 'domcontentloaded' }); await A.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'));
   await A.click('#tab-btn-phrase'); await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');

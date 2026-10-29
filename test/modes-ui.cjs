@@ -3,7 +3,7 @@
 const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const mk = async () => { const p = await (await b.newContext({ viewport: { width: 960, height: 540 } })).newPage(); p.errs = []; p.on('pageerror', (e) => p.errs.push(e.message)); return p; };
+  const mk = async () => { const p = await (await b.newContext({ locale: 'ja-JP', viewport: { width: 960, height: 540 } })).newPage({ locale: 'ja-JP' }); p.errs = []; p.on('pageerror', (e) => p.errs.push(e.message)); return p; };
   const A = await mk();
   await A.goto(process.env.URL, { waitUntil: 'domcontentloaded' });
   await A.waitForFunction(() => window.__ht && window.__ht.readyAt);

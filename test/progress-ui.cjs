@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const A = await (await b.newContext({ viewport: { width: 960, height: 540 } })).newPage();
+  const A = await (await b.newContext({ locale: 'ja-JP', viewport: { width: 960, height: 540 } })).newPage({ locale: 'ja-JP' });
   const errs = []; A.on('pageerror', (e) => errs.push(e.message));
   await A.goto(process.env.URL + '/?debug'); await A.waitForFunction(() => window.__ht && window.__ht.readyAt, null, { timeout: 30000 }); await A.waitForSelector('#prof-bar:not(.hidden)');
   await A.fill('#name', 'Alice'); await A.click('#tab-btn-phrase'); await A.click('#btn-create'); await A.waitForTimeout(1200);

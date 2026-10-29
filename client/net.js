@@ -1,12 +1,13 @@
 // Minimal room client for the Cloudflare Durable Object server (worker/room.js).
 // Messages are JSON arrays: [type, data].
+import { t as tr } from './i18n.js';
 export class RoomError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
 }
 
 export async function createRoom(base, rules) {
   const r = await fetch(`${base}/api/rooms`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rules }) });
-  if (!r.ok) throw new RoomError('create_failed', `部屋を作れませんでした (${r.status})`);
+  if (!r.ok) throw new RoomError('create_failed', tr('部屋を作れませんでした ({s})', { s: r.status }));
   return (await r.json()).id;
 }
 
@@ -14,15 +15,15 @@ export async function createRoom(base, rules) {
 export async function joinPhrase(base, phrase, rules) {
   const r = await fetch(`${base}/api/phrase`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phrase, rules }) });
   const j = await r.json().catch(() => ({}));
-  if (r.status === 409) throw new RoomError('full', 'この合言葉の部屋は満室です');
-  if (!r.ok) throw new RoomError(j.error === 'bad_phrase' ? 'bad_phrase' : 'create_failed', j.error === 'bad_phrase' ? '合言葉は2〜16文字にしてください' : `部屋に入れませんでした (${r.status})`);
+  if (r.status === 409) throw new RoomError('full', tr('この合言葉の部屋は満室です'));
+  if (!r.ok) throw new RoomError(j.error === 'bad_phrase' ? 'bad_phrase' : 'create_failed', j.error === 'bad_phrase' ? tr('合言葉は2〜16文字にしてください') : tr('部屋に入れませんでした ({s})', { s: r.status }));
   return j;
 }
 
 // quick match: returns the id of a public room with a free seat (created on demand)
 export async function quickMatch(base, mode, exclude = [], size = 4, goal = 'time', target = 10) {
   const r = await fetch(`${base}/api/quickmatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, size, goal, target, exclude }) });
-  if (!r.ok) throw new RoomError('match_failed', `マッチングに失敗しました (${r.status})`);
+  if (!r.ok) throw new RoomError('match_failed', tr('マッチングに失敗しました ({s})', { s: r.status }));
   return (await r.json()).id;
 }
 
@@ -34,7 +35,7 @@ export async function stats(base) {
 export async function roomInfo(base, id) {
   const r = await fetch(`${base}/api/rooms/${encodeURIComponent(id)}`, { cache: 'no-store' });
   if (r.status === 404) return { exists: false };
-  if (!r.ok) throw new RoomError('info_failed', `サーバーエラー (${r.status})`);
+  if (!r.ok) throw new RoomError('info_failed', tr('サーバーエラー ({s})', { s: r.status }));
   return r.json();
 }
 
@@ -78,7 +79,7 @@ export class Room {
       const ws = new WebSocket(this.wsUrl(name));
       this.ws = ws;
       let settled = false;
-      const timer = setTimeout(() => { if (!settled) { settled = true; ws.close(); reject(new RoomError('timeout', '接続がタイムアウトしました')); } }, 15000);
+      const timer = setTimeout(() => { if (!settled) { settled = true; ws.close(); reject(new RoomError('timeout', tr('接続がタイムアウトしました'))); } }, 15000);
       ws.onmessage = (ev) => {
         let msg; try { msg = JSON.parse(ev.data); } catch { return; }
         const [type, data] = msg;
@@ -95,7 +96,7 @@ export class Room {
         if (h) h(data);
       };
       ws.onclose = (ev) => {
-        if (!settled) { settled = true; clearTimeout(timer); reject(new RoomError('closed', `接続できませんでした (${ev.code})`)); return; }
+        if (!settled) { settled = true; clearTimeout(timer); reject(new RoomError('closed', tr('接続できませんでした ({s})', { s: ev.code }))); return; }
         if (ws !== this.ws) return;
         if (this.left) return;
         if (ev.code === 4001 || ev.code === 4004) { this.emit('leave', ev.code); return; }   // full / not found

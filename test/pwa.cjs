@@ -6,8 +6,8 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
 (async () => {
   const base = process.env.URL;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const ctx = await b.newContext({ viewport: { width: 960, height: 540 } });
-  const p = await ctx.newPage();
+  const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 960, height: 540 } });
+  const p = await ctx.newPage({ locale: 'ja-JP' });
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
 
   // manifest and icons

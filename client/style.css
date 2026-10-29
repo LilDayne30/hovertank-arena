@@ -418,3 +418,8 @@ body.touch #abil { display: none; }
 @media (max-aspect-ratio: 1/1) { .lb-bl { bottom: auto; top: 98px; } }
 @media (max-aspect-ratio: 1/1) { .lb-tl { width: calc(100vw - 28px); } .lb-tr { top: 96px; } }
 @media (max-height: 430px) { #btn-phrase-close { display: none; } }
+
+/* language switch: always readable in both languages */
+.lang-btn { font-weight: 800; letter-spacing: .02em; }
+.lb-tr .lang-btn { border: 2px solid rgba(255,181,71,.7); }
+#settings .lang-btn { background: #6b5138; color: #fff7ea; }

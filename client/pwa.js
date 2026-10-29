@@ -1,3 +1,4 @@
+import { t as tr } from './i18n.js';
 // PWA glue: service worker registration, "add to home screen" button, offline notice.
 const $ = (id) => document.getElementById(id);
 
@@ -25,7 +26,7 @@ export function setupPwa({ onOffline } = {}) {
     // iOS / iPadOS: no prompt API, explain the share-sheet step instead
     if (isIOS()) {
       box.classList.remove('hidden');
-      help.textContent = 'Safariの共有ボタン（□↑）→「ホーム画面に追加」で、アプリのように全画面で起動できます。';
+      help.textContent = tr('Safariの共有ボタン（□↑）→「ホーム画面に追加」で、アプリのように全画面で起動できます。');
     }
     btn.onclick = async () => {
       if (deferred) {

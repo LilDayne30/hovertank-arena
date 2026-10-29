@@ -10,8 +10,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const errors = [];
   const open = async (name, url) => {
-    const ctx = await b.newContext({ viewport: { width: 480, height: 270 } });   // separate storage = separate player
-    const p = await ctx.newPage();
+    const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 480, height: 270 } });   // separate storage = separate player
+    const p = await ctx.newPage({ locale: 'ja-JP' });
     p.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
     const t0 = Date.now();
     await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });

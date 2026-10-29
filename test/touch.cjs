@@ -3,8 +3,8 @@ const { chromium, devices } = require('playwright');
 (async () => {
   const URL = process.env.URL;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
-  const ctx = await b.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices['iPhone 13'].userAgent });
-  const p = await ctx.newPage();
+  const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices['iPhone 13'].userAgent });
+  const p = await ctx.newPage({ locale: 'ja-JP' });
   const logs = []; p.on('pageerror', e => logs.push('PAGEERROR ' + e.message));
   await p.goto(URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await p.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'), null, { timeout: 60000 });

@@ -7,8 +7,8 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const errors = [];
   const mk = async (vp = { width: 800, height: 450 }) => {
-    const c = await b.newContext({ viewport: vp });
-    const p = await c.newPage();
+    const c = await b.newContext({ locale: 'ja-JP', viewport: vp });
+    const p = await c.newPage({ locale: 'ja-JP' });
     await p.addInitScript(() => { try { localStorage.setItem('ht-quality', 'low'); } catch {} });   // keep 3 software-rendered pages fast enough
     p.on('pageerror', (e) => errors.push(e.message));
     p.on('console', (m) => { if (m.type() === 'error' && !/favicon|WebSocket/.test(m.text())) errors.push(m.text()); });
