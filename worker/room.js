@@ -42,6 +42,7 @@ export class BattleRoom extends DurableObject {
       const saved = await this.ctx.storage.get('rules');
       if (saved && this.game.size === 0) this.game.setRules(saved);
       this.public = !!(await this.ctx.storage.get('public'));
+      this.phrase = (await this.ctx.storage.get('phrase')) || null;
       this.game.autoFill = this.public;   // quick-match rooms: empty seats are filled with CPU players
     }
 
@@ -56,6 +57,23 @@ export class BattleRoom extends DurableObject {
       this.created = true;
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
       return json({ ok: true });
+    }
+    // passphrase room: join it if someone is (or is about to be) inside, otherwise (re)make it with these rules
+    if (url.pathname === '/claim') {
+      let b = {};
+      try { b = await request.json(); } catch { /* ignore */ }
+      const busy = this.created && (this.game.humans > 0 || Date.now() - (this.claimedAt || 0) < 15000);
+      if (busy) {
+        if (this.game.isFull()) return json({ error: 'full', rules: this.game.rules }, 409);
+        return json({ created: false, rules: this.game.rules, players: this.game.humans });
+      }
+      const rules = cleanRules(b.rules);
+      this.public = false; this.game.autoFill = false; this.phrase = typeof b.phrase === 'string' ? b.phrase.slice(0, 32) : null;
+      this.game.setRules(rules);
+      await this.ctx.storage.put({ created: true, rules, public: false, phrase: this.phrase });
+      this.created = true; this.claimedAt = Date.now();
+      await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
+      return json({ created: true, rules, players: 0 });
     }
     if (url.pathname === '/info') {
       if (!this.created) return json({ exists: false }, 404);
@@ -105,7 +123,7 @@ export class BattleRoom extends DurableObject {
     this.sockets.set(id, ws);
     this.startLoop();
     this.ctx.storage.deleteAlarm();
-    ws.send(JSON.stringify(['welcome', this.game.welcome(id, { token: myToken, roomId: this.roomId, reconnected, public: !!this.public })]));
+    ws.send(JSON.stringify(['welcome', this.game.welcome(id, { token: myToken, roomId: this.roomId, reconnected, public: !!this.public, phrase: this.phrase || undefined })]));
     if (!reconnected) this.report();
     this.game.sendRoster();
 
@@ -194,7 +212,7 @@ export class BattleRoom extends DurableObject {
     const players = this.game.humans;   // CPU players don't count: they leave when people arrive
     this.env.MATCH.get(this.env.MATCH.idFromName('global')).fetch('https://mm/update', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode, size: this.game.rules.size, open: players === 0 || this.game.open }),
+      body: JSON.stringify({ id: this.roomId, players, mode: this.game.rules.mode, size: this.game.rules.size, goal: this.game.rules.goal, target: this.game.rules.target, open: players === 0 || this.game.open }),
     }).catch(() => {});
   }
 

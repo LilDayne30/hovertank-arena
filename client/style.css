@@ -253,3 +253,9 @@ body.touch #abil { display: none; }
 .loadout .lo-desc em { display: block; font-style: normal; color: #ffd9a0; }
 .tag .lo { margin-left: 4px; font-size: 11px; opacity: .85; letter-spacing: 1px; }
 #settings .sec-h { font-size: 13px; opacity: .85; margin-top: 10px; }
+
+/* passphrase */
+.phrase-row { gap: 6px; margin-top: 8px; }
+.phrase-row input { flex: 1; min-width: 0; font-size: 16px; }
+.phrase-row button { padding: 6px 10px; font-size: 18px; }
+.phrase-big { font-size: 30px; font-weight: 800; letter-spacing: .06em; color: var(--accent); margin: 6px 0; word-break: break-all; }

@@ -69,14 +69,17 @@
     <div class="lobby-sec">
       <button id="btn-quick" type="button" class="big">クイックマッチ</button>
       <div id="qm-mode" class="rules"><div class="row"><span class="lbl">モード</span><button data-v="any" type="button">どちらでも</button><button data-v="ffa" type="button">個人戦</button><button data-v="team" type="button">チーム戦</button></div>
-        <div class="row" id="qm-size"><span class="lbl">人数</span><button data-n="2" type="button">2人（1対1）</button><button data-n="3" type="button">3人</button><button data-n="4" type="button">4人</button></div></div>
+        <div class="row" id="qm-size"><span class="lbl">人数</span><button data-n="2" type="button">2人（1対1）</button><button data-n="3" type="button">3人</button><button data-n="4" type="button">4人</button></div>
+        <div class="row" id="qm-goal"><span class="lbl">勝利条件</span><button data-g="time" type="button">5分間で多く倒す</button><button data-g="kills" type="button">先に</button><select aria-label="キル数"></select><span class="lbl2">キル</span></div></div>
     </div>
     <div class="lobby-sec">
-      <div class="sec-h">プライベートマッチ（招待URLの部屋・CPUの数と強さも選べる）</div>
+      <div class="sec-h">プライベートマッチ（同じ合言葉を入れた人どうしで遊ぶ・CPUの数と強さも選べる）</div>
+    <div class="row phrase-row"><input id="phrase" maxlength="16" autocomplete="off" placeholder="合言葉（例：たこやき）" aria-label="合言葉" /><button id="btn-phrase-rand" type="button" aria-label="合言葉をおまかせで決める" title="おまかせ">🎲</button></div>
     <div id="lobby-rules" class="rules"></div>
+    <p class="note">誰もいない合言葉なら、このルールで新しい部屋ができます。友達はロビーで同じ合言葉を入れるだけで参加できます（ルールは先に入った人のもの）。ほかの人と同じ言葉だと知らない人が入ることがあるので、ちょっと変わった言葉がおすすめ。</p>
     <p id="lobby-room-rules"></p>
     <div id="lobby-actions">
-      <button id="btn-create" type="button">部屋を作る</button>
+      <button id="btn-create" type="button">合言葉で入る</button>
       <button id="btn-join" type="button" class="hidden">この部屋に参加</button>
     </div>
     </div>
@@ -113,9 +116,11 @@
   </div>
 
   <div id="invite" class="panel hidden">
-    <h2>招待URL</h2>
-    <p>このURLを送ると同じ部屋に参加できます（最大4人）。</p>
-    <input id="invite-url" readonly />
+    <h2 id="invite-h">招待</h2>
+    <div id="invite-phrase-box" class="hidden"><p class="phrase-big" id="invite-phrase"></p>
+      <p>友達にこの合言葉を伝えて、ロビーの「合言葉」に同じ言葉を入れてもらうと、この部屋で一緒に遊べます（最大4人）。</p></div>
+    <div id="invite-url-box"><p>このURLを送ると同じ部屋に参加できます（最大4人）。</p>
+    <input id="invite-url" readonly /></div>
     <div class="row"><button id="btn-copy" type="button">コピー</button><button id="btn-share" type="button">共有</button><button id="btn-invite-close" type="button">閉じる</button></div>
   </div>
 
@@ -130,7 +135,7 @@
     <div class="sec-h">装備</div>
     <div id="settings-loadout" class="loadout"></div>
     <div id="settings-rules" class="rules"></div>
-    <p id="public-note" class="note hidden">クイックマッチの部屋はルール固定です（個人戦／チーム戦ごとに相手を探すため）。</p>
+    <p id="public-note" class="note hidden">クイックマッチの部屋はルール固定です（同じモード・人数・勝利条件を選んだ人どうしで集めるため）。ルールはロビーで選べます。</p>
     <div class="row"><button id="btn-newgame" type="button">このルールでニューゲーム</button><button id="btn-team" type="button" class="hidden">チームを変える</button></div>
     <p class="note">ニューゲームは全員のスコアと試合をリセットして最初からやり直します（2回押し）。</p>
     <div class="row"><button id="btn-garage2" type="button">ガレージ</button></div>

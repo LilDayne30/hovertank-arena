@@ -145,7 +145,7 @@ export class BotBrain {
 
     // ------------------------------------------------ where to go
     let goal = null, mode = 'roam';
-    if (game.heal.active && me.hp <= P.heal) { goal = { x: HEAL_POS.x, z: HEAL_POS.z }; mode = 'heal'; }
+    if (this.wantsHeal(me, game)) { goal = { x: HEAL_POS.x, z: HEAL_POS.z }; mode = 'heal'; }
     else if (tgt && this.vis) mode = 'fight';
     else if (this.lastSeen) { goal = this.lastSeen; mode = 'hunt'; if (Math.hypot(goal.x - t.x, goal.z - t.z) < 4) this.lastSeen = null; }
     else if (tgt) { goal = { x: tgt.x, z: tgt.z }; mode = 'hunt'; }
@@ -163,12 +163,13 @@ export class BotBrain {
         }
       }
       const tx = (tgt.x - t.x) / (dist || 1), tz = (tgt.z - t.z) / (dist || 1);
-      const radial = clamp((dist - P.pref) / 10, -1, 1);
+      const pref = t.ultK === 'slam' && t.ult >= ULT_MAX ? 5 : P.pref;   // slam ready: get in close
+      const radial = clamp((dist - pref) / 10, -1, 1);
       dirX = tx * radial + -tz * this.strafe * 0.9; dirZ = tz * radial + tx * this.strafe * 0.9;
     } else if (goal) {
       const gx = goal.x - t.x, gz = goal.z - t.z, gd = Math.hypot(gx, gz) || 1;
       dirX = gx / gd; dirZ = gz / gd;
-      if (mode === 'heal' && gd < 2) { dirX *= 0.2; dirZ *= 0.2; }
+      if (mode === 'heal' && gd < 2) { dirX *= game.heal.active ? 0.6 : 0.1; dirZ *= game.heal.active ? 0.6 : 0.1; }   // drive over it / wait on top
     }
 
     // obstacle avoidance: steer to the free direction closest to the wanted one
@@ -203,26 +204,51 @@ export class BotBrain {
       if (Math.random() < P.jumpRand * DT) inp.j = true;
     }
 
-    // ------------------------------------------------ sidearm / special (simple, strength-scaled habits)
+    // ------------------------------------------------ sidearm / special
+    // every strength uses them; stronger CPUs time them better (dodge at the last moment, perfect guard)
     const skill = this.skill;
     const incoming = this.incomingShell(me, game, 0.35);
-    if (t.sideCd <= 0) {
-      if (t.side === 'dash' && incoming && Math.random() < 0.15 + skill * 0.5) {
-        // sidestep the shell
-        const sx = -incoming.vz, sz = incoming.vx, sl = Math.hypot(sx, sz) || 1, side = Math.random() < 0.5 ? 1 : -1;
-        inp.mx = (sx / sl) * side; inp.mz = (sz / sl) * side; inp.a = true;
-      } else if (t.side === 'dash' && tgt && dist > P.pref + 18 && Math.random() < 0.01) inp.a = true;
-      else if (t.side === 'shield' && incoming && incoming.eta < 0.05 + skill * 0.25 && Math.random() < 0.2 + skill * 0.6) inp.a = true;
-      else if (t.side === 'mine' && tgt && dist < 22 && Math.random() < 0.02) inp.a = true;
-      else if (t.side === 'bounce' && tgt && this.vis && aligned && dist < P.range && Math.random() < P.fire * 0.5) inp.a = true;
+    const sideTry = (p) => Math.random() < p * DT * 30;   // p = chance per 1/30 s
+    if (t.sideCd <= 0 && game.phase === 'play') {
+      if (t.side === 'dash') {
+        if (incoming && sideTry(0.15 + skill * 0.5)) {
+          // sidestep the shell
+          const sx = -incoming.vz, sz = incoming.vx, sl = Math.hypot(sx, sz) || 1, side = Math.random() < 0.5 ? 1 : -1;
+          inp.mx = (sx / sl) * side; inp.mz = (sz / sl) * side; inp.a = true;
+        } else if (mode === 'heal' && Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z) > 12 && sideTry(0.04)) inp.a = true;   // rush to the heal
+        else if (tgt && this.vis && (dist > P.pref + 14 || me.hp <= 34) && sideTry(0.02)) inp.a = true;    // close in / get away
+        else if (tgt && this.vis && sideTry(0.006)) inp.a = true;                                          // random juke while strafing
+      } else if (t.side === 'shield') {
+        if (incoming && incoming.eta < 0.05 + skill * 0.25 && sideTry(0.2 + skill * 0.6)) inp.a = true;
+        else if (incoming && skill < 0.4 && sideTry(0.05)) inp.a = true;                               // weak CPUs just raise it early
+      } else if (t.side === 'mine') {
+        if (tgt && dist < 24 && sideTry(0.03)) inp.a = true;
+        else if (Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z) < 9 && sideTry(0.03)) inp.a = true;   // trap the heal hill
+      } else if (t.side === 'bounce' && tgt && aligned && dist < P.range && (this.vis || this.lastSeen) && sideTry(0.04 + P.fire * 0.3)) inp.a = true;
     }
-    if (t.ult >= ULT_MAX && tgt && this.vis && !shieldUp) {
+    if (t.ult >= ULT_MAX && tgt && !shieldUp && game.phase === 'play') {
       const k = t.ultK;
-      if (k === 'overdrive' && dist < 50) inp.u = true;
-      else if ((k === 'mega' || k === 'strike') && aligned && dist > 12 && dist < 70 && Math.random() < 0.3) inp.u = true;
-      else if (k === 'slam' && dist < 8) inp.u = true;
+      if (k === 'overdrive' && this.vis && dist < 55) inp.u = true;
+      else if ((k === 'mega' || k === 'strike') && this.vis && aligned && dist > 10 && dist < 75 && sideTry(0.25)) inp.u = true;
+      else if (k === 'strike' && !this.vis && this.lastSeen && sideTry(0.01)) inp.u = true;   // bomb where it hid
+      else if (k === 'slam' && (dist < 9 || (!t.grounded && dist < 14))) inp.u = true;
     }
-    return inp;
+        return inp;
+  }
+
+  // go for the heal pickup? (it only works below full HP). Hurt bots go from further away, and a
+  // badly hurt one also heads for the hill a few seconds before the next one appears.
+  // Once decided it sticks to it (no dithering) until healed or the item is gone.
+  wantsHeal(me, game) {
+    const t = me.tank, H = game.heal, sk = this.skill;
+    if (me.hp >= 100 || (!H.active && H.nextAt - game.time > 2 + sk * 4)) { this.healGoal = false; return false; }
+    const d = Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z);
+    if (this.healGoal) return true;
+    const want = H.active
+      ? me.hp <= 40 || (me.hp <= 70 && d < 28 + sk * 30) || d < 10 + sk * 8
+      : me.hp <= 70 && d < 18 + sk * 22;
+    if (want && Math.random() < 0.15 + sk * 0.5) this.healGoal = true;   // reacts within a few ticks
+    return this.healGoal;
   }
 
   // the nearest enemy shell that will pass close to us soon: { vx, vz, eta } or null

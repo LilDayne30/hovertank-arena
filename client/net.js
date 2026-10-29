@@ -10,9 +10,18 @@ export async function createRoom(base, rules) {
   return (await r.json()).id;
 }
 
+// private room by passphrase: { id, created, rules } (same phrase -> same room)
+export async function joinPhrase(base, phrase, rules) {
+  const r = await fetch(`${base}/api/phrase`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phrase, rules }) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 409) throw new RoomError('full', 'この合言葉の部屋は満室です');
+  if (!r.ok) throw new RoomError(j.error === 'bad_phrase' ? 'bad_phrase' : 'create_failed', j.error === 'bad_phrase' ? '合言葉は2〜16文字にしてください' : `部屋に入れませんでした (${r.status})`);
+  return j;
+}
+
 // quick match: returns the id of a public room with a free seat (created on demand)
-export async function quickMatch(base, mode, exclude = [], size = 4) {
-  const r = await fetch(`${base}/api/quickmatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, size, exclude }) });
+export async function quickMatch(base, mode, exclude = [], size = 4, goal = 'time', target = 10) {
+  const r = await fetch(`${base}/api/quickmatch`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, size, goal, target, exclude }) });
   if (!r.ok) throw new RoomError('match_failed', `マッチングに失敗しました (${r.status})`);
   return (await r.json()).id;
 }

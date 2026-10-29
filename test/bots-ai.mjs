@@ -128,3 +128,13 @@ function run(levels, seconds, rules = {}) {
   ok(loads.every(([s]) => counts[`side:${s}`] > 0), 'every sidearm gets used by CPUs');
   ok(loads.filter(([, u]) => counts[`ult:${u}`] > 0).length >= 3, 'specials get used by CPUs');
 }
+
+// CPUs go for the heal pickup (it appears every 20 s here)
+for (const lvl of ['easy', 'hard']) {
+  let heals = 0, waitHurt = 0;
+  const g = new Game(world, { send() {}, broadcast: (t, d) => { if (t === 's') for (const e of d.e) if (e.t === 'heal') heals++; } }, { matchSeconds: 9999, healInterval: 20 });
+  for (let i = 0; i < 4; i++) g.addBot(lvl);
+  for (let i = 0; i < 240 / DT; i++) { g.step(); if (g.heal.active && [...g.players.values()].some((p) => p.alive && p.hp <= 70)) waitHurt += DT; }
+  console.log(`      ${lvl}: ${heals} heals in 4 min, item left lying while someone was hurt: ${waitHurt.toFixed(0)} s`);
+  ok(heals >= 6, `${lvl} CPUs pick up the heal item (${heals} times)`);
+}

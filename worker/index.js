@@ -5,7 +5,8 @@ export { Matchmaker } from './matchmaker.js';
 export { PlayerProfile, TransferCodes } from './profile.js';
 export { GameStats } from './stats.js';
 import { statEvent, statsStub } from './stats.js';
-import { roomCode } from './codes.js';
+import { roomCode, phraseRoomId } from './codes.js';
+import { normPhrase } from '../shared/arena.js';
 import { TOKEN_RE, profileKey, profileStub, newToken } from './profile.js';
 
 const matchmaker = (env) => env.MATCH.get(env.MATCH.idFromName('global'));
@@ -27,10 +28,22 @@ export default {
       return json({ id });
     }
 
+    // passphrase: the same phrase always leads to the same private room. If nobody is in it, it is
+    // (re)made with the rules of the person arriving; otherwise they join with the room's rules.
+    if (url.pathname === '/api/phrase' && request.method === 'POST') {
+      const body = await request.json().catch(() => ({}));
+      const norm = normPhrase(body.phrase);
+      if (!norm) return json({ error: 'bad_phrase' }, 400);
+      const id = await phraseRoomId(norm);
+      const stub = env.ROOMS.get(env.ROOMS.idFromName(id));
+      const r = await stub.fetch('https://room/claim', { method: 'POST', headers: { 'x-room-id': id, 'content-type': 'application/json' }, body: JSON.stringify({ rules: body.rules ?? null, phrase: norm }) });
+      return json({ id, ...(await r.json()) }, r.status);
+    }
+
     // quick match: the matchmaker picks (or creates) a public room with a free seat
     if (url.pathname === '/api/quickmatch' && request.method === 'POST') {
       const body = await request.json().catch(() => ({}));
-      return matchmaker(env).fetch('https://mm/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: body.mode, size: body.size, exclude: body.exclude }) });
+      return matchmaker(env).fetch('https://mm/match', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: body.mode, size: body.size, goal: body.goal, target: body.target, exclude: body.exclude }) });
     }
     if (url.pathname === '/api/stats') return matchmaker(env).fetch('https://mm/stats');
     if (url.pathname.startsWith('/api/profile')) return profileApi(request, env, url.pathname.slice('/api/profile'.length), ctx);

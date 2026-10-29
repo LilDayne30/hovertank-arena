@@ -119,7 +119,9 @@ export function cleanRules(r) {
   };
 }
 // quick-match rooms: "個人戦・3人・5分間" (no CPU settings there)
-export function qmLabel(r) { return `${r.mode === 'team' ? 'チーム戦（2対2）' : `個人戦・${r.size}人`}・5分間`; }
+export function qmLabel(r) { return `${r.mode === 'team' ? 'チーム戦（2対2）' : `個人戦・${r.size}人`}・${r.goal === 'kills' ? `${r.target}キル先取` : '5分間'}`; }
+// quick match: rooms only match people who picked the same win condition ('t' = 5 min, 'k10' = first to 10 kills)
+export const goalKey = (r) => (r?.goal === 'kills' ? `k${cleanRules(r).target}` : 't');
 export function rulesLabel(r) {
   return `${r.mode === 'team' ? 'チーム戦' : '個人戦'}・${r.goal === 'kills' ? `${r.target}キル先取` : '5分間'}${r.bots ? `・CPU${r.bots}（${BOT_LEVEL_NAMES[r.botLevel]}）` : ''}`;
 }
@@ -133,3 +135,13 @@ export const HEAL_POS = { x: 0, y: 2.6, z: 0 };   // ground height of the hill t
 export const RESULT_SECONDS = 10;
 export const RECONNECT_SECONDS = 20;
 export const MAX_PLAYERS = 4;
+
+// Private rooms are joined with a passphrase (合言葉): everyone who types the same one meets in the
+// same room. Full-width / half-width, upper / lower case, katakana / hiragana and spaces don't matter.
+export const PHRASE_MIN = 2, PHRASE_MAX = 16;
+export function normPhrase(s) {
+  const n = String(s ?? '').normalize('NFKC').toLowerCase().replace(/\s+/g, '')
+    .replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));   // katakana -> hiragana
+  const len = [...n].length;
+  return len >= PHRASE_MIN && len <= PHRASE_MAX ? n : '';
+}

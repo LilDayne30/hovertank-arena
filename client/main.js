@@ -1,10 +1,10 @@
 import * as pc from 'playcanvas';
-import { Room, createRoom, roomInfo, quickMatch, stats as fetchStats } from './net.js';
+import { Room, roomInfo, quickMatch, joinPhrase, stats as fetchStats } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim, projectile, SHELL_KINDS,
 } from '../shared/sim.js';
 import { SIDEARMS, ULTS, SIDE, ULT, ULT_MAX, cleanLoadout } from '../shared/abilities.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel, qmLabel } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel, qmLabel, normPhrase } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
@@ -77,8 +77,16 @@ async function init() {
   if (rid) { $('btn-join').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
   // rules for a new room (remembered); when opened from an invite, show the room's rules instead
   const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
-  $('btn-create').dataset.rules = '';
-  $('btn-create').onclick = () => start('create', null, lobbyRules.get());
+  // private match: passphrase (empty -> one is made up)
+  $('phrase').value = store.get('ht-phrase') || '';
+  $('btn-phrase-rand').onclick = () => { $('phrase').value = randomPhrase(); };
+  $('phrase').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) $('btn-create').click(); });
+  $('btn-create').onclick = () => {
+    if (!$('phrase').value.trim()) $('phrase').value = randomPhrase();
+    if (!normPhrase($('phrase').value)) { $('lobby-status').textContent = '合言葉は2〜16文字にしてください。'; return; }
+    store.set('ht-phrase', $('phrase').value.trim());
+    start('phrase', null, lobbyRules.get());
+  };
   // quick match (public rooms) with a mode preference
   // quick match: mode + how many tanks fight (team battle is always 2 v 2)
   let qmMode = store.get('ht-qm') || 'any', qmSize = Number(store.get('ht-qm-size')) || 4;
@@ -89,8 +97,19 @@ async function init() {
   };
   document.querySelectorAll('#qm-mode [data-v]').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
   document.querySelectorAll('#qm-size button').forEach((b) => { b.onclick = () => { qmSize = Number(b.dataset.n); store.set('ht-qm-size', String(qmSize)); if (qmMode === 'team' && qmSize !== 4) qmMode = 'ffa'; paintQm(); }; });
-  paintQm();
-  $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize);
+  // win condition (people are matched with others who picked the same)
+  let qmGoal = store.get('ht-qm-goal') === 'kills' ? 'kills' : 'time', qmTarget = KILL_TARGETS.includes(Number(store.get('ht-qm-target'))) ? Number(store.get('ht-qm-target')) : 10;
+  const goalSel = document.querySelector('#qm-goal select');
+  goalSel.innerHTML = KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('');
+  const paintGoal = () => {
+    document.querySelectorAll('#qm-goal [data-g]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.g === qmGoal)));
+    goalSel.value = String(qmTarget); goalSel.classList.toggle('dim', qmGoal !== 'kills');
+    store.set('ht-qm-goal', qmGoal); store.set('ht-qm-target', String(qmTarget));
+  };
+  document.querySelectorAll('#qm-goal [data-g]').forEach((b) => { b.onclick = () => { qmGoal = b.dataset.g; paintGoal(); }; });
+  goalSel.onchange = () => { qmTarget = Number(goalSel.value); qmGoal = 'kills'; paintGoal(); };
+  paintQm(); paintGoal();
+  $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize, qmGoal, qmTarget);
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   loadoutPicker($('lobby-loadout')); loadoutPicker($('settings-loadout'));
@@ -235,11 +254,13 @@ function wireUi() {
   $('btn-invite').onclick = () => { document.exitPointerLock?.(); showInvite(); };
   $('btn-invite-close').onclick = () => $('invite').classList.add('hidden');
   $('btn-copy').onclick = async () => {
-    const v = $('invite-url').value;
+    const v = myPhrase || $('invite-url').value;
     try { await navigator.clipboard.writeText(v); $('btn-copy').textContent = 'コピーしました'; } catch { $('invite-url').select(); document.execCommand?.('copy'); }
     setTimeout(() => { $('btn-copy').textContent = 'コピー'; }, 1500);
   };
-  $('btn-share').onclick = () => navigator.share?.({ title: 'Hover Tank Arena', text: '一緒に対戦しよう', url: $('invite-url').value }).catch(() => {});
+  $('btn-share').onclick = () => navigator.share?.(myPhrase
+    ? { title: 'Hover Tank Arena', text: `Hover Tank Arenaで一緒に対戦しよう！ ロビーの「合言葉」に「${myPhrase}」と入れてね`, url: `${location.origin}${location.pathname}` }
+    : { title: 'Hover Tank Arena', text: '一緒に対戦しよう', url: $('invite-url').value }).catch(() => {});
   if (!navigator.share) $('btn-share').classList.add('hidden');
   $('btn-fullscreen').onclick = async () => {
     try { await document.documentElement.requestFullscreen?.(); await screen.orientation?.lock?.('landscape'); } catch { /* not supported (iOS Safari) */ }
@@ -273,15 +294,23 @@ function setupSound() {
   document.addEventListener('click', (e) => { if (e.target.closest?.('button') && !e.target.closest('.btn-mute')) sound.click(); });
 }
 
+let myPhrase = '';   // passphrase of the private room you are in ('' = quick match / old invite link)
 function showInvite() {
   $('invite-url').value = `${location.origin}${location.pathname}?r=${room.roomId}`;
+  $('invite-h').textContent = myPhrase ? '合言葉' : '招待URL';
+  $('invite-phrase').textContent = myPhrase;
+  $('invite-phrase-box').classList.toggle('hidden', !myPhrase);
+  $('invite-url-box').classList.toggle('hidden', !!myPhrase);
   $('invite').classList.remove('hidden');
 }
+const PHRASE_WORDS = ['たこ', 'いか', 'ねこ', 'うに', 'くま', 'そら', 'ほし', 'もち', 'かぜ', 'ゆき', 'つき', 'はな', 'さめ', 'きつね', 'たぬき', 'かに'];
+function randomPhrase() { return `${PHRASE_WORDS[Math.floor(Math.random() * PHRASE_WORDS.length)]}${10 + Math.floor(Math.random() * 90)}`; }
 function showLoading(on, text) { $('loading').classList.toggle('hidden', !on); if (text) $('loading-text').textContent = text; }
 function banner(text) { $('banner').textContent = text || ''; $('banner').classList.toggle('hidden', !text); }
 
 // ------------------------------------------------------------------ networking
-async function start(mode, rid, newRules, qmMode, qmSize = 4) {
+let phraseJoin = null;
+async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', qmTarget = 10) {
   const name = $('name').value.trim().slice(0, 12);
   store.set('ht-name', name);
   $('lobby-status').textContent = '';
@@ -293,13 +322,18 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4) {
       const tried = [];
       for (let attempt = 0; attempt < 4; attempt++) {
         showLoading(true, attempt ? '別の部屋を探しています…' : '対戦相手を探しています…');
-        id = await quickMatch(ENDPOINT, qmMode, tried, qmSize);
+        id = await quickMatch(ENDPOINT, qmMode, tried, qmSize, qmGoal, qmTarget);
         room = new Room(ENDPOINT, id);
         room.quick = true;
         bindRoom(room);
         try { await room.connect(name, null); break; } catch (e) { room = null; tried.push(id); if (e.code !== 'full' || attempt === 3) throw e; }
       }
-    } else if (mode === 'create') id = await createRoom(ENDPOINT, newRules);
+    } else if (mode === 'phrase') {
+      const raw = $('phrase').value.trim();
+      const res = await joinPhrase(ENDPOINT, raw, newRules);
+      id = res.id; phraseJoin = { raw, created: res.created, rules: res.rules };
+      store.sset(`ht-phrase-${id}`, raw);
+    }
     else {
       const info = await roomInfo(ENDPOINT, id);
       if (!info.exists) throw Object.assign(new Error('notfound'), { code: 'notfound' });
@@ -327,7 +361,10 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4) {
   $('hud').classList.remove('hidden');
   document.body.classList.add('playing');
   input.enabled = true;
-  if (mode === 'create') showInvite();
+  if (mode === 'phrase') {
+    if (phraseJoin.created) { showInvite(); notice(`合言葉「${escapeHtml(phraseJoin.raw)}」の部屋を作りました`); }
+    else notice(`合言葉「${escapeHtml(phraseJoin.raw)}」の部屋に参加しました（${rulesLabel(phraseJoin.rules)}）`);
+  }
   if (mode === 'quick') notice('クイックマッチ：対戦に参加しました');
   if (!input.touchMode) $('center-msg').textContent = 'クリックで操作開始';
   setInterval(() => room?.send('ping', performance.now()), 2000);
@@ -338,7 +375,9 @@ function bindRoom(r) {
     const sendProf = () => { if (profile.token) r.send('prof', profile.token); };
     if (profile.token) sendProf(); else profile.load().then(sendProf).catch(() => {});
     r.send('loadout', loadout);
-    myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+    myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public;
+    myPhrase = m.phrase ? (store.sget(`ht-phrase-${r.roomId}`) || m.phrase) : '';
+    $('btn-invite').textContent = myPhrase ? '合言葉' : '招待'; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
