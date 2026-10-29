@@ -116,3 +116,15 @@ function run(levels, seconds, rules = {}) {
   ok(g2.botCount === 1 && [...g2.players.values()].find((p) => p.bot).bot.level === 'easy', 'new rules: 1 easy bot');
   ok([...g2.players.values()].find((p) => p.bot).prof.bot === true, 'private-room bots keep the CPU label');
 }
+
+// CPU players use their sidearms and specials
+{
+  const counts = {};
+  const g = new Game(world, { send() {}, broadcast: (t, d) => { if (t === 's') for (const e of d.e) if (e.t === 'side' || e.t === 'ult') counts[`${e.t}:${e.k}`] = (counts[`${e.t}:${e.k}`] || 0) + 1; } }, { matchSeconds: 9999 });
+  const loads = [['dash', 'overdrive'], ['shield', 'mega'], ['mine', 'strike'], ['bounce', 'slam']];
+  for (const [side, ult] of loads) { const b = g.addBot('normal'); g.onLoadout(b.id, { side, ult }); }
+  for (let i = 0; i < 180 / DT; i++) g.step();
+  console.log('      ability uses in 3 min:', JSON.stringify(counts));
+  ok(loads.every(([s]) => counts[`side:${s}`] > 0), 'every sidearm gets used by CPUs');
+  ok(loads.filter(([, u]) => counts[`ult:${u}`] > 0).length >= 3, 'specials get used by CPUs');
+}

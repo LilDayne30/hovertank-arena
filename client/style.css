@@ -72,7 +72,7 @@ button:disabled { opacity: .5; cursor: default; }
 .tag { position: absolute; transform: translate(-50%, -100%); font-size: 12px; text-align: center; white-space: nowrap; }
 .tag .bar { width: 46px; height: 4px; background: rgba(0,0,0,.5); margin: 2px auto 0; border-radius: 2px; overflow: hidden; }
 .tag .bar i { display: block; height: 100%; background: #ff6b5a; }
-#pc-help { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); font-size: 12px; opacity: .8; white-space: nowrap; }
+#pc-help { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); font-size: 12px; opacity: .8; white-space: nowrap; }
 body.touch #pc-help { display: none; }
 #banner { position: fixed; top: 46px; left: 50%; transform: translateX(-50%); background: var(--panel); padding: 8px 16px; border-radius: 8px; z-index: 30; font-size: 14px; }
 #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(40,26,14,.75); z-index: 40; }
@@ -217,3 +217,39 @@ button.mini { padding: 3px 8px; font-size: 11px; }
 #flash.death { animation: kflash .7s ease-out; background: radial-gradient(circle at 50% 50%, rgba(255,80,40,.0) 30%, rgba(200,20,10,.55) 100%); }
 @keyframes kflash { 0% { opacity: 1; } 25% { opacity: .85; } 100% { opacity: 0; } }
 #center-msg.pop { text-shadow: 0 0 18px rgba(255,170,60,.9), 0 2px 4px rgba(0,0,0,.7); }
+
+/* sidearm / special HUD (PC) and touch buttons */
+#abil { position: absolute; left: calc(50% + min(150px, 20vw) + 14px); bottom: 12px; display: flex; gap: 10px; align-items: flex-end; }
+body.touch #abil { display: none; }
+.ab { --cd: 1; position: relative; width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  background: conic-gradient(rgba(255,255,255,.28) calc(var(--cd) * 360deg), rgba(0,0,0,.55) 0); border: 2px solid rgba(255,255,255,.35); }
+.ab .ic { font-size: 20px; line-height: 1; opacity: .55; }
+.ab .key { position: absolute; right: -4px; bottom: -4px; font-size: 10px; background: rgba(0,0,0,.7); border-radius: 4px; padding: 0 4px; }
+.ab.ready { border-color: #8fe3ff; box-shadow: 0 0 10px #4cb4ff; background: rgba(76,180,255,.35); }
+.ab.ready .ic { opacity: 1; }
+.ab.ult { width: 54px; height: 54px; background: conic-gradient(#ffb547 calc(var(--cd) * 360deg), rgba(0,0,0,.55) 0); }
+.ab.ult .ic { font-size: 24px; }
+.ab.ult.ready { border-color: #ffe08a; background: rgba(255,170,60,.6); animation: ultpulse .8s ease-in-out infinite alternate; }
+.ab .pct { position: absolute; top: -15px; left: 0; right: 0; text-align: center; font-size: 10px; font-style: normal; opacity: .85; }
+.ab.on { border-color: #fff; box-shadow: 0 0 16px #fff; }
+@keyframes ultpulse { from { box-shadow: 0 0 8px #ffb547; } to { box-shadow: 0 0 22px #ffcf6b; } }
+.abtn { --cd: 1; flex-direction: column; background: conic-gradient(rgba(255,255,255,.3) calc(var(--cd) * 360deg), rgba(0,0,0,.35) 0); }
+.abtn .ic { font-size: 22px; line-height: 1; } .abtn small { font-size: 9px; opacity: .85; }
+.abtn.ready { border-color: #8fe3ff; box-shadow: 0 0 10px #4cb4ff; }
+#btn-ult { background: conic-gradient(rgba(255,181,71,.75) calc(var(--cd) * 360deg), rgba(0,0,0,.35) 0); }
+#btn-ult.ready { border-color: #ffe08a; animation: ultpulse .8s ease-in-out infinite alternate; background: rgba(255,170,60,.6); }
+#btn-side { width: 58px; height: 58px; right: calc(124px + env(safe-area-inset-right)); bottom: 106px; }
+#btn-ult { width: 64px; height: 64px; right: calc(206px + env(safe-area-inset-right)); bottom: 70px; }
+
+/* loadout picker */
+.loadout { font-size: 13px; }
+.loadout .lo-h { margin: 8px 0 4px; opacity: .85; font-size: 12px; }
+.loadout .lo-opts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+@media (max-width: 560px) { .loadout .lo-opts { grid-template-columns: repeat(2, 1fr); } }
+.loadout button { padding: 6px 4px; font-size: 12px; background: #6b5138; color: #fff7ea; display: flex; gap: 4px; align-items: center; justify-content: center; line-height: 1.2; }
+.loadout button b { font-size: 16px; }
+.loadout button[aria-pressed="true"] { background: var(--accent); color: #2b1d12; }
+.loadout .lo-desc { font-size: 12px; margin: 4px 0 0; opacity: .85; line-height: 1.45; min-height: 2.9em; }
+.loadout .lo-desc em { display: block; font-style: normal; color: #ffd9a0; }
+.tag .lo { margin-left: 4px; font-size: 11px; opacity: .85; letter-spacing: 1px; }
+#settings .sec-h { font-size: 13px; opacity: .85; margin-top: 10px; }

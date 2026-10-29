@@ -1,8 +1,9 @@
 import * as pc from 'playcanvas';
 import { Room, createRoom, roomInfo, quickMatch, stats as fetchStats } from './net.js';
 import {
-  C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim,
+  C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim, projectile, SHELL_KINDS,
 } from '../shared/sim.js';
+import { SIDEARMS, ULTS, SIDE, ULT, ULT_MAX, cleanLoadout } from '../shared/abilities.js';
 import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, rulesLabel, qmLabel } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
@@ -57,6 +58,13 @@ const mats = {};
 const heal = { active: false, next: 0, e: null, tag: null };
 let rules = { ...DEFAULT_RULES }, myTeam = 0, teamKills = [0, 0], settingsRules = null, publicRoom = false;
 const sameTeam = (id) => rules.mode === 'team' && roster.get(id)?.team === myTeam;
+// sidearm + special choice (kept on this device, sent to the room on join and on every change)
+let loadout = cleanLoadout(JSON.parse(store.get('ht-loadout') || 'null'));
+const loadoutPickers = [];
+const reflected = new Set();      // shells you turned around with a perfect guard (now yours, drawn from the server)
+const megaShown = new Set();      // your own mega cannon blasts already drawn locally
+const mines = new Map();          // mine id -> entity
+const abil = { sideReady: true, ultReady: false };
 window.__ht = { stats, local, snaps, setCam: DEBUG ? (y, p) => { camYaw = y; camPitch = p; } : undefined, los: DEBUG ? (...a) => lineOfSight(...a) : undefined, get aim() { return aimPoint; }, get room() { return room; }, get fps() { return fpsSmooth; }, get ping() { return ping; }, get fx() { return fx; }, get app() { return app; } };
 
 // ------------------------------------------------------------------ boot
@@ -85,6 +93,7 @@ async function init() {
   $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize);
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
+  loadoutPicker($('lobby-loadout')); loadoutPicker($('settings-loadout'));
   wireUi();
   setupSound();
   profile = new Profile(ENDPOINT);
@@ -172,10 +181,11 @@ async function setupEngine() {
 
   input = new Input(canvas, {
     touchLayer: $('touch-layer'), stickBase: $('stick-base'), stickKnob: $('stick-knob'),
-    btnFire: $('btn-fire'), btnJump: $('btn-jump'), btnDrift: $('btn-drift'),
+    btnFire: $('btn-fire'), btnJump: $('btn-jump'), btnDrift: $('btn-drift'), btnSide: $('btn-side'), btnUlt: $('btn-ult'),
     onPointerLock: (locked) => { $('pc-help').style.opacity = locked ? '0.35' : '0.9'; },
   });
   input.enabled = false;
+  if (DEBUG) window.__ht.input = input;
   const sens = parseFloat(store.get('ht-sens') || '1');
   $('sens').value = String(sens); setSens(sens);
 
@@ -327,6 +337,7 @@ function bindRoom(r) {
   r.onMessage('welcome', (m) => {
     const sendProf = () => { if (profile.token) r.send('prof', profile.token); };
     if (profile.token) sendProf(); else profile.load().then(sendProf).catch(() => {});
+    r.send('loadout', loadout);
     myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public; if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
@@ -366,10 +377,13 @@ function parseSnap(m) {
       hp: a[10], alive: !!(a[11] & 1), grounded: !!(a[11] & 2), invuln: !!(a[11] & 4), connected: !!(a[11] & 8), drifting: !!(a[11] & 16),
       lastSeq: a[12], cooldown: a[13], shotSeq: a[14], kills: a[15], deaths: a[16], spawnId: a[17], respawnIn: a[18],
       charge: a[19] || 0, boost: a[20] || 0, boostLvl: a[21] || 0, invulnLeft: a[22] || 0,
+      sideCd: a[23] || 0, ult: a[24] || 0, shieldT: a[25] || 0, shieldAge: a[26] ?? 9, odT: a[27] || 0, slam: a[28] || 0,
+      side: SIDEARMS[a[29]]?.id || 'dash', ultK: ULTS[a[30]]?.id || 'overdrive', dashT: a[31] || 0,
     });
   }
-  const shells = m.b.map((b) => ({ id: b[0], owner: b[1], seq: b[2], x: b[3], y: b[4], z: b[5], vx: b[6], vy: b[7], vz: b[8] }));
-  return { k: m.k, ph: m.ph, tl: m.tl, players, shells, hl: !!m.hl, hn: m.hn || 0 };
+  const shells = m.b.map((b) => ({ id: b[0], owner: b[1], seq: b[2], x: b[3], y: b[4], z: b[5], vx: b[6], vy: b[7], vz: b[8], kind: SHELL_KINDS[b[9]] || 'shell', bounce: b[10] || 0 }));
+  const mn = (m.mn || []).map((a) => ({ id: a[0], owner: a[1], x: a[2], y: a[3], z: a[4], armed: !!a[5] }));
+  return { k: m.k, ph: m.ph, tl: m.tl, players, shells, mines: mn, hl: !!m.hl, hn: m.hn || 0 };
 }
 
 function onSnapshot(m) {
@@ -390,6 +404,7 @@ function onSnapshot(m) {
     }
     if (e.t === 'healspawn') notice('中央の丘に回復アイテムが出現！');
     if (e.t === 'heal' && e.v === myId) { centerFlash('全回復！', 1000, true); flashHeal(); }
+    if (e.t === 'reflect') { reflected.add(e.s); if (reflected.size > 200) reflected.clear(); }
     pendingEvents.push({ k: s.k, e });
   }
   if (phase !== s.ph) { phase = s.ph; if (phase === 'play') { $('result').classList.add('hidden'); sound.horn(); } }
@@ -438,6 +453,7 @@ function fromServer(p) {
   Object.assign(t, {
     y: p.y, vx: p.vx, vy: p.vy, vz: p.vz, aimYaw: p.ay, aimPitch: p.ap, grounded: p.grounded, cooldown: p.cooldown, shotSeq: p.shotSeq,
     charge: p.charge, boost: p.boost, boostLvl: p.boostLvl, drifting: p.drifting,
+    sideCd: p.sideCd, ult: p.ult, shieldT: p.shieldT, shieldAge: p.shieldAge, odT: p.odT, slam: p.slam, dashT: p.dashT, side: p.side, ultK: p.ultK,
   });
   return t;
 }
@@ -494,16 +510,22 @@ function tick() {
   const mx = rx * s.mx + fx0 * s.my, mz = rz * s.mx + fz0 * s.my;
   let ay = camYaw, ap = 0;
   if (local.t) [ay, ap] = solveAim(local.t, aimPoint);
-  const inp = { seq: ++seq, mx: r3(mx), mz: r3(mz), ay: r3(ay), ap: r3(ap), j: s.jump, d: s.drift, f: s.fire && phase === 'play' };
+  const play = phase === 'play';
+  const inp = { seq: ++seq, mx: r3(mx), mz: r3(mz), ay: r3(ay), ap: r3(ap), j: s.jump, d: s.drift, f: s.fire && play, a: s.side && play, u: s.ult && play };
+  if (!inp.a) delete inp.a;
+  if (!inp.u) delete inp.u;
   local.sliding = false;
   if (local.alive && local.t) {
     local.prev = { ...local.t };
     const t = local.t;
     const ev = stepTank(t, inp, world);
     const gy = t.y - C.hoverHeight;
-    if (ev.fired) { fireLocalShell(t); fx.addShake(0.07); }
-    if (ev.landed) { fx.landRing(t.x, gy, t.z, 1); sound.land(null, true); }
-    if (ev.jumped) { fx.jumpRing(t.x, gy, t.z); sound.jump(null, true); }
+    if (ev.fired) { fireLocalShell(t, 'shell', ev.fireSeq); fx.addShake(0.07); }
+    if (ev.side) localSide(t, ev, gy);
+    if (ev.ult) localUlt(t, ev, gy);
+    if (ev.slam) { fx.slamWave(t.x, gy, t.z, ULT.slam.radius); sound.slam(null, true); fovKick = 12; }
+    else if (ev.landed) { fx.landRing(t.x, gy, t.z, 1); sound.land(null, true); }
+    if (ev.jumped && !ev.ult) { fx.jumpRing(t.x, gy, t.z); sound.jump(null, true); }
     if (ev.boost) { fx.boostBurst(t.x, gy, t.z, t.yaw, ev.boost); fovKick = ev.boost === 2 ? 14 : 9; fx.addShake(0.15 * ev.boost); sound.boost(null, true, ev.boost); }
     const lvl = t.charge >= C.charge2 ? 2 : t.charge >= C.charge1 ? 1 : 0;
     if (lvl > lastCharge) sound.chargeTing(lvl);
@@ -517,6 +539,27 @@ function tick() {
 }
 let outBuf = [];
 const r3 = (v) => Math.round(v * 1000) / 1000;
+
+// your own sidearm / special: instant feedback (the server does the real work)
+function localSide(t, ev, gy) {
+  if (ev.side === 'dash') {
+    const sp = Math.hypot(t.vx, t.vz) || 1;
+    fx.dashBurst(t.x, gy, t.z, t.vx / sp, t.vz / sp); sound.dash(null, true); fovKick = 11; fx.addShake(0.12);
+  } else if (ev.side === 'shield') { fx.shieldUp(t.x, gy, t.z); sound.shieldUp(null, true); }
+  else if (ev.side === 'mine') sound.minePlace(null, true);
+  else if (ev.side === 'bounce') fireLocalShell(t, 'bounce', ev.sideSeq);
+  flashAbility('ab-side');
+}
+function localUlt(t, ev, gy) {
+  const U = ULT[ev.ult];
+  centerFlash(`${U.icon} ${U.name}`, 900, true);
+  if (ev.ult === 'overdrive') { fx.overdriveStart(t.x, gy, t.z, true); sound.overdrive(null, true); fovKick = 8; }
+  else if (ev.ult === 'mega') { fireLocalShell(t, 'mega', ev.ultSeq); fx.addShake(0.4); fovKick = -6; }
+  else if (ev.ult === 'strike') sound.strikeCall(null, true, false);
+  else if (ev.ult === 'slam') { fx.jumpRing(t.x, gy, t.z); sound.slamJump(null, true); }
+  flashAbility('ab-ult');
+}
+function flashAbility(id) { const el = $(id); el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 180); }
 
 // ------------------------------------------------------------------ materials
 function makeMaterials() {
@@ -542,6 +585,10 @@ function makeMaterials() {
     m.blendType = pc.BLEND_ADDITIVE; m.depthWrite = false; m.update(); return m;
   });
   mats.slotLit = PLAYER_COLORS.map((c) => { const m = new pc.StandardMaterial(); m.diffuse = new pc.Color(...c); m.update(); return m; });
+  mats.bounceShell = fx.col([0.6, 1, 0.35], true, 1); mats.bouncePuff = fx.col([0.55, 1, 0.4]);
+  mats.megaShell = fx.col([1, 0.45, 1], true, 1);
+  mats.mineBody = (() => { const m = new pc.StandardMaterial(); m.diffuse = new pc.Color(0.16, 0.15, 0.14); m.update(); return m; })();
+  mats.mineMine = fx.col([0.35, 0.8, 1], true, 1); mats.mineEnemy = fx.col([1, 0.2, 0.1], true, 1); mats.mineOff = fx.col([0.5, 0.45, 0.4]);
 }
 
 // ------------------------------------------------------------------ heal pickup
@@ -687,8 +734,20 @@ function placeTank(v, x, y, z, yaw, aimYaw, vx, vz, visible, invuln, time) {
   v.hover.setLocalScale(3.6 * pulse * clamp(1 - hgt * 0.2, 0.3, 1), 1, 4.6 * pulse * clamp(1 - hgt * 0.2, 0.3, 1));
   v.hover.setEulerAngles(0, yaw * pc.math.RAD_TO_DEG, 0);
   // spawn shield: steady bubble, blinks in its last half second
-  v.shield.enabled = invuln && (v.invulnLeft > 0.5 || Math.floor(time * 12) % 2 === 0);
-  if (v.shield.enabled) { v.shieldMat.opacity = 0.22 + Math.sin(time * 6) * 0.08; v.shieldMat.update(); }
+  // reflect shield (sidearm): brighter and bigger; white during the perfect-guard window
+  const guard = v.shieldT > 0;
+  v.shield.enabled = guard || (invuln && (v.invulnLeft > 0.5 || Math.floor(time * 12) % 2 === 0));
+  if (v.shield.enabled) {
+    const perfect = guard && v.shieldAge <= SIDE.shield.perfect;
+    const mode = perfect ? 2 : guard ? 1 : 0;
+    if (v.shieldMode !== mode) {
+      v.shieldMode = mode;
+      v.shieldMat.emissive = mode === 2 ? new pc.Color(1, 1, 1) : mode === 1 ? new pc.Color(0.45, 0.95, 1) : new pc.Color(0.4, 0.85, 1);
+      const k = mode ? 1.12 : 1; v.shield.setLocalScale(5.2 * k, 3.6 * k, 5.6 * k);
+    }
+    v.shieldMat.opacity = mode === 2 ? 0.75 : mode === 1 ? 0.38 + Math.sin(time * 14) * 0.08 + (v.shieldT < 0.4 && Math.floor(time * 14) % 2 ? -0.25 : 0) : 0.22 + Math.sin(time * 6) * 0.08;
+    v.shieldMat.update();
+  }
 }
 
 function renderLocal(alpha, dt, stopping) {
@@ -707,6 +766,7 @@ function renderLocal(alpha, dt, stopping) {
     x = f.x; y = f.y; z = f.z; yaw = f.yaw;
   } else hitstop.frozen = null;
   v.boost = b.boost; v.boostLvl = b.boostLvl; v.charge = b.charge; v.drifting = local.sliding; v.invulnLeft = local.invulnLeft;
+  v.shieldT = b.shieldT; v.shieldAge = b.shieldAge; v.odT = b.odT; v.dashT = b.dashT; v.slam = b.slam;
   if (v.lastSpawn !== local.spawnId) { v.lastSpawn = local.spawnId; fx.respawnBeam(x, y - C.hoverHeight, z, mats.slotGlow[mySlot % 4]); sound.respawn(null, true); }
   v.hp = local.hp;
   placeTank(v, x, y, z, yaw, camYaw, b.vx, b.vz, true, local.invuln, performance.now() / 1000);
@@ -742,6 +802,7 @@ function renderRemote(rt) {
     const ay = pa.ay + wrapPi(pb.ay - pa.ay) * f;
     const src = f < 0.5 ? pa : pb;
     v.boost = src.boost; v.boostLvl = src.boostLvl; v.charge = src.charge; v.invulnLeft = src.invulnLeft;
+    v.shieldT = src.shieldT; v.shieldAge = src.shieldAge; v.odT = src.odT; v.dashT = src.dashT; v.slam = src.slam;
     // derive cosmetic state changes (jump / land / slide / respawn) from the interpolated stream
     if (vis) {
       const sp3 = { x, y, z };
@@ -761,33 +822,63 @@ function renderRemote(rt) {
   // remote shells: rendered at the same (past) time as the tanks that fired them
   const used = new Set();
   for (const s of a.shells) {
-    if (s.owner === myId) continue;
-    const dt = (rt - a.k) * DT;
-    const px = s.x + s.vx * dt, py = s.y + s.vy * dt - 0.5 * C.shellGravity * dt * dt, pz = s.z + s.vz * dt;
+    if (s.owner === myId && !reflected.has(s.id)) continue;
+    const dt = (rt - a.k) * DT, g = s.kind === 'mega' ? ULT.mega.gravity : C.shellGravity;
+    const px = s.x + s.vx * dt, py = s.y + s.vy * dt - 0.5 * g * dt * dt, pz = s.z + s.vz * dt;
     if (!seenShells.has(s.id)) {
       seenShells.add(s.id);
-      const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
-      fx.muzzle(px, py, pz, s.vx / sp, s.vy / sp, s.vz / sp);
-      sound.fire({ x: px, y: py, z: pz }, false);
-      const ov = tanks.get(s.owner); if (ov) ov.recoil = 1;
+      if (!reflected.has(s.id)) {
+        const sp = Math.hypot(s.vx, s.vy, s.vz) || 1;
+        if (s.kind === 'mega') { fx.megaMuzzle(px, py, pz, s.vx / sp, s.vy / sp, s.vz / sp); sound.megaFire({ x: px, y: py, z: pz }, false); }
+        else { fx.muzzle(px, py, pz, s.vx / sp, s.vy / sp, s.vz / sp); sound.fire({ x: px, y: py, z: pz }, false); }
+        const ov = tanks.get(s.owner); if (ov) ov.recoil = s.kind === 'mega' ? 2 : 1;
+      }
       if (seenShells.size > 300) seenShells.clear();
     }
-    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - C.shellGravity * dt, s.vz, s.owner);
+    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - g * dt, s.vz, s.owner, s.kind);
     used.add(`r${s.id}`);
   }
   for (const [key, e] of shellEnts) if (key[0] === 'r' && !used.has(key)) freeShell(key, e);
+  updateMines(b.mines || []);
+}
+
+// mines: a dark disc with a light; yours / your team's glow blue, enemy ones blink red now and then
+function updateMines(list) {
+  const seen = new Set(), now = performance.now() / 1000;
+  for (const m of list) {
+    seen.add(m.id);
+    let e = mines.get(m.id);
+    if (!e) {
+      e = new pc.Entity('mine');
+      e.addComponent('render', { type: 'cylinder', material: mats.mineBody, castShadows: false });
+      e.setLocalScale(1.3, 0.22, 1.3);
+      const l = new pc.Entity('light');
+      l.addComponent('render', { type: 'sphere', material: mats.mineOff, castShadows: false });
+      l.setLocalScale(0.3, 1.5, 0.3); l.setLocalPosition(0, 0.6, 0);
+      e.addChild(l); e.light = l;
+      root.addChild(e); mines.set(m.id, e);
+      e.setPosition(m.x, m.y + 0.08, m.z);
+    }
+    const friendly = m.owner === myId || sameTeam(m.owner);
+    const blink = friendly ? Math.floor(now * 2) % 2 === 0 : (now + m.id * 0.37) % 1.6 < 0.12;
+    const mat = !m.armed ? mats.mineOff : blink ? (friendly ? mats.mineMine : mats.mineEnemy) : mats.mineOff;
+    if (e.light.render.material !== mat) e.light.render.material = mat;
+  }
+  for (const [id, e] of mines) if (!seen.has(id)) { e.destroy(); mines.delete(id); }
 }
 
 function flushEvents(rt) {
   while (pendingEvents.length && pendingEvents[0].k <= rt + 0.5) {
     const { e } = pendingEvents.shift();
-    if (e.t === 'boom') { if (e.o !== myId) { fx.explosion(e.x, e.y, e.z, 1.6); sound.boom(e, 1); } }
+    if (e.t === 'boom') { if (e.o !== myId && e.k !== 2) { fx.explosion(e.x, e.y, e.z, 1.6); sound.boom(e, 1); } }
+    else if (abilityEvent(e)) { /* handled */ }
     else if (e.t === 'hit') {
       fx.hitSpark(e.x, e.y, e.z);
       if (e.v !== myId) sound.boom(e, 1.15);
       const v = tanks.get(e.v); if (v) v.flash = 1;
       if (e.o === myId) killLocalShell(e.q, false);
     } else if (e.t === 'shield') { fx.shieldSpark(e.x, e.y, e.z); sound.shield(e); if (e.o === myId) killLocalShell(e.q, false); }
+    else if (e.t === 'block') { fx.shieldSpark(e.x, e.y, e.z); sound.shield(e); if (e.o === myId) killLocalShell(e.q, false); const v = tanks.get(e.v); if (v) v.flash = 0.25; }
     else if (e.t === 'healspawn') { fx.healSpawn(HEAL_POS.x, HEAL_POS.y, HEAL_POS.z); sound.healSpawn(); }
     else if (e.t === 'heal') {
       fx.healBurst(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
@@ -808,6 +899,59 @@ function flushEvents(rt) {
   }
 }
 
+// sidearm / special events from the server (returns true when handled)
+function abilityEvent(e) {
+  const v = tanks.get(e.v), me = e.v === myId, gyAt = (x, z) => heightAt(world, x, z);
+  switch (e.t) {
+    case 'side': {
+      if (me || !v?.visible) return true;
+      const gy = v.pos.y - C.hoverHeight;
+      if (e.k === 'dash') { const sp = Math.hypot(v.vx, v.vz) || 1; fx.dashBurst(v.pos.x, gy, v.pos.z, v.vx / sp, v.vz / sp); sound.dash(v.pos, false); }
+      else if (e.k === 'shield') { fx.shieldUp(v.pos.x, gy, v.pos.z); sound.shieldUp(v.pos, false); }
+      else if (e.k === 'mine') sound.minePlace(v.pos, false);
+      return true;
+    }
+    case 'ult': {
+      if (me) return true;
+      const U = ULT[e.k];
+      if (U) notice(`<span style="color:${colorCss(roster.get(e.v)?.slot ?? 0)}">${escapeHtml(nameOf(e.v))}</span> の必殺技　${U.icon} ${U.name}`);
+      if (!v?.visible) return true;
+      const gy = v.pos.y - C.hoverHeight;
+      if (e.k === 'overdrive') { fx.overdriveStart(v.pos.x, gy, v.pos.z); sound.overdrive(v.pos, false); }
+      else if (e.k === 'slam') { fx.jumpRing(v.pos.x, gy, v.pos.z); sound.slamJump(v.pos, false); }
+      return true;
+    }
+    case 'reflect': {
+      fx.reflectBurst(e.x, e.y, e.z); sound.reflect(e, me);
+      if (e.o === myId) { killLocalShell(e.q, false); centerFlash('はね返された！', 900); }
+      if (me) { centerFlash('ジャストガード！', 1000, true); fx.addShake(0.3); }
+      return true;
+    }
+    case 'rico': if (e.o !== myId || reflected.has(e.s)) { fx.rico(e.x, e.y, e.z); sound.rico(e); } return true;
+    case 'mega': {
+      if (e.o === myId && megaShown.has(e.q)) return true;
+      if (e.o === myId) killLocalShell(e.q, false, true);
+      else { fx.megaBlast(e.x, e.y, e.z, gyAt(e.x, e.z)); sound.bigBoom(e, 1.8); }
+      return true;
+    }
+    case 'strike': {
+      const mine = e.o === myId, enemy = !mine && !sameTeam(e.o), gy = gyAt(e.x, e.z), U = ULT.strike;
+      const last = Math.max(...e.b.map((b) => b[2]));
+      fx.strikeMarker(e.x, gy, e.z, U.spread, last + 0.35, enemy);
+      if (!mine) sound.strikeCall(e, false, enemy);
+      for (const [bx, bz, dt] of e.b) {
+        const fall = Math.min(0.6, dt), by = gyAt(bx, bz);
+        fx.later(Math.max(0, dt - fall), () => { fx.bombFall(bx, by, bz, fall); sound.bombWhistle({ x: bx, y: by, z: bz }, fall); });
+      }
+      return true;
+    }
+    case 'bomb': fx.bombBlast(e.x, e.y, e.z); sound.boom(e, 1.4); return true;
+    case 'mineboom': fx.mineBlast(e.x, e.y, e.z); sound.bigBoom(e, 1.3); return true;
+    case 'slam': if (!me) { fx.slamWave(e.x, e.y, e.z, ULT.slam.radius); sound.slam(e, false); } return true;
+    default: return false;
+  }
+}
+
 // per-frame cosmetic effects on every visible tank
 let smokeClock = 0;
 function tankFx(dt) {
@@ -824,6 +968,8 @@ function tankFx(dt) {
     const gy = heightAt(world, v.pos.x, v.pos.z);
     if (v.drifting && v.pos.y - C.hoverHeight - gy < 0.3) fx.driftSparks(v.pos.x, gy, v.pos.z, v.yaw, v.charge >= C.charge2 ? 2 : v.charge >= C.charge1 ? 1 : 0, looks.sparkMat(v.look));
     if (v.boost > 0) fx.exhaust(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.yaw, v.boostLvl);
+    if (v.odT > 0) fx.overdriveAura(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z);
+    if (v.dashT > 0 || v.slam === 2) fx.dashTrail(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z);
     v.smokeT -= dt;
     if (v.hp <= 67 && v.smokeT <= 0) { fx.damageSmoke(v.pos.x, v.pos.y - C.hoverHeight, v.pos.z, v.hp <= 34); v.smokeT = v.hp <= 34 ? 0.1 / fx.scale : 0.35 / fx.scale; }
     if (id === myId) fx.listener = v.pos;
@@ -919,7 +1065,7 @@ function lobbyCamera() {
 
 // ------------------------------------------------------------------ shells
 const shellEnts = new Map(), shellPool = [];
-function drawShell(key, x, y, z, vx, vy, vz, owner) {
+function drawShell(key, x, y, z, vx, vy, vz, owner, kind = 'shell') {
   const trail = tanks.get(owner)?.trail;
   let e = shellEnts.get(key);
   if (!e) {
@@ -939,25 +1085,30 @@ function drawShell(key, x, y, z, vx, vy, vz, owner) {
   e.setPosition(x, y, z);
   const sp = Math.hypot(vx, vy, vz) || 1;
   e.lookAt(x + vx / sp, y + vy / sp, z + vz / sp);
+  if (kind === 'mega') { e.setLocalScale(0.8, 0.8, 3.4); e.render.material = mats.megaShell; fx.megaTrail(x, y, z); return; }
+  if (kind === 'bounce') { e.setLocalScale(0.36, 0.36, 1.5); e.render.material = mats.bounceShell; fx.trail(x, y, z, false, mats.bouncePuff); return; }
   e.setLocalScale(0.28, 0.28, 1.9);
   e.render.material = trail?.shell || fx.m.shell;
   fx.trail(x, y, z, false, trail?.puff);
 }
 function freeShell(key, e) { e.enabled = false; shellEnts.delete(key); shellPool.push(e); }
 
-function fireLocalShell(t) {
-  const m = muzzle(t);
-  localShells.push({ seq: t.shotSeq, ...m, px: m.x, py: m.y, pz: m.z, life: C.shellLife, acc: 0 });
+function fireLocalShell(t, kind = 'shell', seq = t.shotSeq) {
+  const m = projectile(t, kind);
+  localShells.push({ seq, ...m, px: m.x, py: m.y, pz: m.z, acc: 0 });
   const sp = Math.hypot(m.vx, m.vy, m.vz);
-  fx.muzzle(m.x, m.y, m.z, m.vx / sp, m.vy / sp, m.vz / sp);
-  sound.fire(m, true);
-  const v = tanks.get(myId); if (v) v.recoil = 1;
+  if (kind === 'mega') { fx.megaMuzzle(m.x, m.y, m.z, m.vx / sp, m.vy / sp, m.vz / sp); sound.megaFire(m, true); }
+  else { fx.muzzle(m.x, m.y, m.z, m.vx / sp, m.vy / sp, m.vz / sp); sound.fire(m, true); }
+  const v = tanks.get(myId); if (v) v.recoil = kind === 'mega' ? 2 : 1;
 }
-function killLocalShell(q, boom = true) {
+// remove a predicted shell; a mega cannon shell always ends in its big blast (drawn once)
+function killLocalShell(q, boom = true, mega = false) {
   const i = localShells.findIndex((s) => s.seq === q);
   if (i < 0) return;
   const s = localShells[i];
-  if (boom) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); }
+  if (s.kind === 'mega' && (boom || mega || !megaShown.has(s.seq))) {
+    if (!megaShown.has(s.seq)) { megaShown.add(s.seq); if (megaShown.size > 50) megaShown.delete(megaShown.values().next().value); fx.megaBlast(s.x, s.y, s.z, heightAt(world, s.x, s.z)); sound.bigBoom(s, 1.8); }
+  } else if (boom) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); }
   const key = `l${s.seq}`; const e = shellEnts.get(key);
   if (e) freeShell(key, e);
   localShells.splice(i, 1);
@@ -969,16 +1120,17 @@ function updateLocalShells(dt) {
     let dead = false;
     while (s.acc >= DT && !dead) {
       s.acc -= DT;
-      const { hitGround } = stepShell(s, world);
-      if (hitGround || s.life <= 0) { dead = true; if (hitGround) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); } break; }
+      const { hitGround, bounced } = stepShell(s, world);
+      if (bounced) { fx.rico(s.x, s.y, s.z); sound.rico(s); }
+      if (hitGround || s.life <= 0) { dead = true; if (hitGround) killLocalShell(s.seq, true); break; }
       for (const [id, v] of tanks) {   // visual-only hit; the server decides damage
         if (id === myId || !v.visible || sameTeam(id)) continue;
         if (segmentHitsTank(s, { x: v.pos.x, y: v.pos.y, z: v.pos.z })) { dead = true; break; }
       }
     }
-    if (dead) { killLocalShell(s.seq, false); continue; }
+    if (dead) { killLocalShell(s.seq, false, true); continue; }
     const f = s.acc / DT;
-    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz, myId);
+    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz, myId, s.kind);
   }
 }
 
@@ -1078,6 +1230,7 @@ function updateHud(dt) {
   g.classList.toggle('show', ch > 0.05 || (t && t.boost > 0));
   $('drift-fill').style.width = `${Math.min(100, (ch / C.charge2) * 100)}%`;
   g.dataset.lvl = ch >= C.charge2 ? '2' : ch >= C.charge1 ? '1' : '0';
+  updateAbilityHud(t);
   $('shield-msg').classList.toggle('hidden', !(local.alive && local.invuln));
   if (local.alive && local.invuln) $('shield-msg').textContent = `無敵 ${local.invulnLeft.toFixed(1)}秒（撃つと解除）`;
   if (performance.now() > centerUntil) {
@@ -1094,6 +1247,48 @@ function updateHud(dt) {
     $('net').textContent = `${Math.round(ping)} ms`;
   }
 }
+// sidearm cooldown ring + special meter (PC: next to the HP bar, touch: the SUB / SP buttons)
+function updateAbilityHud(t) {
+  const S = SIDE[t?.side || loadout.side], U = ULT[t?.ultK || loadout.ult];
+  const live = local.alive && !!t && phase === 'play';
+  const sideK = t ? 1 - t.sideCd / S.cd : 1, ultK = t ? t.ult / ULT_MAX : 0;
+  const sideReady = live && t.sideCd <= 0, ultReady = live && t.ult >= ULT_MAX;
+  for (const [ids, k, ready, icon] of [[['ab-side', 'btn-side'], sideK, sideReady, S.icon], [['ab-ult', 'btn-ult'], ultK, ultReady, U.icon]]) {
+    for (const id of ids) {
+      const el = $(id), cd = k.toFixed(3);
+      if (el.dataset.cd !== cd) { el.dataset.cd = cd; el.style.setProperty('--cd', cd); }
+      el.classList.toggle('ready', ready);
+      const ic = el.querySelector('.ic'); if (ic.textContent !== icon) ic.textContent = icon;
+    }
+  }
+  const pct = `${Math.floor(ultK * 100)}%`, pe = $('ab-ult').querySelector('.pct'); if (pe.textContent !== pct) pe.textContent = pct;
+  // ready pings (not on respawn / match start)
+  if (sideReady && !abil.sideReady) sound.readyPing('side');
+  if (ultReady && !abil.ultReady) { sound.readyPing('ult'); notice(`必殺技 ${U.icon} ${U.name} READY（${input.touchMode ? 'SPボタン' : 'Qキー'}）`); }
+  abil.sideReady = sideReady || !live; abil.ultReady = ultReady || (!live && abil.ultReady);
+}
+
+// sidearm / special chooser (the lobby and the settings panel share one state)
+function loadoutPicker(el) {
+  const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b>${a.name}</button>`;
+  el.innerHTML = `<div class="lo-h">サイドアーム <small>（${document.body.classList.contains('touch') ? 'SUBボタン' : 'Eキー'}・クールダウン制）</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p>
+    <div class="lo-h">必殺技 <small>（${document.body.classList.contains('touch') ? 'SPボタン' : 'Qキー'}・ゲージ満タンで使える）</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p>`;
+  const paint = () => {
+    el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(loadout[b.dataset.k] === b.dataset.v)));
+    const S = SIDE[loadout.side], U = ULT[loadout.ult];
+    el.querySelector('[data-d="side"]').innerHTML = `${escapeHtml(S.desc)}（クールダウン${S.cd}秒）<em>コツ：${escapeHtml(S.tip)}</em>`;
+    el.querySelector('[data-d="ult"]').innerHTML = `${escapeHtml(U.desc)}<em>コツ：${escapeHtml(U.tip)}</em>`;
+  };
+  el.querySelectorAll('button').forEach((b) => { b.onclick = () => {
+    loadout = cleanLoadout({ ...loadout, [b.dataset.k]: b.dataset.v });
+    store.set('ht-loadout', JSON.stringify(loadout));
+    room?.send('loadout', loadout);
+    for (const p of loadoutPickers) p();
+  }; });
+  loadoutPickers.push(paint);
+  paint();
+}
+
 function updateTags() {
   const tmp = new pc.Vec3();
   const w = app.graphicsDevice.clientRect?.width || window.innerWidth;
@@ -1108,12 +1303,12 @@ function updateTags() {
     v.tag.style.display = 'block';
     v.tag.style.left = `${tmp.x}px`; v.tag.style.top = `${tmp.y}px`;
     const r = roster.get(id);
-    const tk = `${ally}|${v.name}|${r?.lv}|${r?.bot}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}`;
+    const tk = `${ally}|${v.name}|${r?.lv}|${r?.bot}|${r?.look?.emblem}|${r?.look?.title}|${r?.look?.frame}|${r?.lo?.side}|${r?.lo?.ult}`;
     if (v.tagKey !== tk) {
       v.tagKey = tk;
       v.tag.className = `tag frame-${r?.look?.frame || 'none'}${ally ? ' ally' : ''}`;
       const ttl = titleName(r?.look?.title);
-      v.tag.firstChild.innerHTML = `${ally ? '▼ ' : ''}${r?.bot ? '<span class="cpu">CPU</span>' : r?.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r?.look?.emblem, 12)}${escapeHtml(v.name || '')}${ttl ? `<span class="ttl">${escapeHtml(ttl)}</span>` : ''}`;
+      v.tag.firstChild.innerHTML = `${ally ? '▼ ' : ''}${r?.bot ? '<span class="cpu">CPU</span>' : r?.lv ? `<span class="lv">Lv${r.lv}</span>` : ''}${emblemSvg(r?.look?.emblem, 12)}${escapeHtml(v.name || '')}${r?.lo ? `<span class="lo">${SIDE[r.lo.side]?.icon || ''}${ULT[r.lo.ult]?.icon || ''}</span>` : ''}${ttl ? `<span class="ttl">${escapeHtml(ttl)}</span>` : ''}`;
       v.tag.firstChild.style.color = colorCss(v.slot);
     }
     v.tag.querySelector('i').style.width = `${v.hp}%`;

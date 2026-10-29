@@ -416,6 +416,126 @@ export class Fx {
     this.add({ shape: 'torus', mat: this.m.greenGlow, x, y: y + 0.2, z, life: 0.8, s0: 10, s1: 2, sy: 0.08 });
   }
 
+  // ------------------------------------------------------------------ sidearms / specials
+  dashBurst(x, y, z, dx, dz) {
+    const m = this.m, a = Math.atan2(dx, dz) * 57.3;
+    this.add({ shape: 'torus', mat: m.cyan, x, y: y + 0.9, z, life: 0.25, s0: 2, s1: 6, sy: 0.1, rx: 90, ry: a, curve: 'pop' });
+    this.add({ mat: m.cyan, x, y: y + 0.9, z, life: 0.18, s0: 2.5, s1: 4, curve: 'pop' });
+    for (let i = 0; i < this.n(14); i++) {
+      const sp = rnd(14, 28);
+      this.add({ shape: 'box', mat: i % 3 ? m.blue : m.white, x: x + rnd(-1, 1), y: y + rnd(0.3, 1.6), z: z + rnd(-1, 1), vx: (-dx + rnd(-0.3, 0.3)) * sp, vy: rnd(-1, 2), vz: (-dz + rnd(-0.3, 0.3)) * sp, drag: 3, life: rnd(0.2, 0.35), s0: 0.22, s1: 0.03, align: true });
+    }
+    this.dust(x, y, z, 4, 1.2);
+  }
+  // after-images while the dash lasts (called per frame)
+  dashTrail(x, y, z) {
+    if (Math.random() > this.scale) return;
+    this.add({ mat: this.m.cyan, x: x + rnd(-0.6, 0.6), y: y + rnd(0.5, 1.5), z: z + rnd(-0.6, 0.6), life: 0.18, s0: 1.2, s1: 0 });
+  }
+  shieldUp(x, y, z) {
+    this.add({ mat: this.m.cyan, x, y: y + 1, z, life: 0.25, s0: 2, s1: 7, curve: 'pop' });
+    this.add({ shape: 'torus', mat: this.m.cyan, x, y: y + 0.3, z, life: 0.35, s0: 2, s1: 8, sy: 0.08, curve: 'pop' });
+  }
+  reflectBurst(x, y, z) {
+    const m = this.m;
+    this.flash(x, y, z, [0.6, 0.9, 1], 4, 0.3, 20);
+    this.add({ mat: m.whiteGlow, x, y, z, life: 0.14, s0: 2, s1: 5, curve: 'pop' });
+    this.add({ shape: 'torus', mat: m.cyan, x, y, z, life: 0.3, s0: 1, s1: 8, sy: 0.1, rx: rnd(60, 120), ry: rnd(0, 360), curve: 'pop' });
+    for (let i = 0; i < this.n(16); i++) {
+      const a = rnd(0, 6.283), e = rnd(-0.6, 1), sp = rnd(12, 26);
+      this.add({ shape: 'box', mat: i % 2 ? m.white : m.blue, x, y, z, vx: Math.cos(a) * sp, vy: e * sp, vz: Math.sin(a) * sp, g: 10, life: rnd(0.25, 0.45), s0: 0.16, s1: 0.03, align: true });
+    }
+  }
+  rico(x, y, z) {
+    this.add({ mat: this.m.core, x, y, z, life: 0.08, s0: 1, s1: 2, curve: 'pop' });
+    for (let i = 0; i < this.n(8); i++) {
+      const a = rnd(0, 6.283), sp = rnd(8, 18);
+      this.add({ shape: 'box', mat: this.m.yellow, x, y, z, vx: Math.cos(a) * sp, vy: rnd(2, 9), vz: Math.sin(a) * sp, g: 20, life: rnd(0.2, 0.35), s0: 0.12, s1: 0.02, align: true });
+    }
+  }
+  megaMuzzle(x, y, z, dx, dy, dz) {
+    const m = this.m, pink = this.col([1, 0.45, 1], true, 0.45);
+    this.muzzle(x, y, z, dx, dy, dz);
+    this.flash(x, y, z, [1, 0.8, 0.95], 1.6, 0.2, 14);
+    this.add({ mat: pink, x: x + dx * 1.5, y: y + dy * 1.5, z: z + dz * 1.5, life: 0.16, s0: 1.2, s1: 2.6, curve: 'pop' });
+    for (let r = 0; r < 3; r++) this.later(r * 0.04, () => this.add({ shape: 'torus', mat: pink, x: x + dx * (2 + r * 2.2), y: y + dy * (2 + r * 2.2), z: z + dz * (2 + r * 2.2), life: 0.22, s0: 0.8, s1: 2.6 - r * 0.5, sy: 0.1, rx: 90 - Math.asin(dy) * 57.3, ry: Math.atan2(dx, dz) * 57.3, curve: 'pop' }));
+    this.add({ mat: m.smokeLight, x: x + dx * 2, y, z: z + dz * 2, vx: dx * 4, vy: 1, vz: dz * 4, drag: 2, life: 0.9, s0: 0, s1: 2, curve: 'puff' });
+    this.addShake(0.35);
+  }
+  megaTrail(x, y, z) {
+    this.add({ mat: this.col([1, 0.45, 1], true, 0.5), x, y, z, life: 0.22, s0: 0.9, s1: 0 });
+    if (Math.random() < this.scale) this.add({ mat: this.m.core, x, y, z, life: 0.12, s0: 0.7, s1: 0 });
+  }
+  megaBlast(x, y, z, gy) {
+    const m = this.m, pink = this.col([1, 0.45, 1], true, 0.75);
+    this.flash(x, y, z, [1, 0.55, 0.9], 8, 0.5, 34);
+    this.explosion(x, y, z, 3.6);
+    this.add({ mat: m.whiteGlow, x, y, z, life: 0.12, s0: 3, s1: 7, curve: 'pop' });
+    this.add({ mat: pink, x, y, z, life: 0.35, s0: 2, s1: 10, curve: 'pop' });
+    this.add({ shape: 'torus', mat: pink, x, y: gy + 0.4, z, life: 0.45, s0: 1, s1: 12, sy: 0.06, curve: 'pop' });
+    this.add({ shape: 'plane', mat: m.scorch, x, y: gy + 0.05, z, life: 5, s0: 6, s1: 6, curve: 'hold', ry: rnd(0, 360) });
+    this.addShake(0.7, x, y, z);
+  }
+  // air strike: a target circle on the ground for the whole strike (red = danger for you)
+  strikeMarker(x, gy, z, radius, life, enemy) {
+    const c = enemy ? [1, 0.25, 0.15] : [1, 0.75, 0.2], ring = this.col(c, true, 0.85), soft = this.col(c, true, 0.25);
+    this.add({ shape: 'torus', mat: ring, x, y: gy + 0.25, z, life, s0: radius * 2.1, s1: radius * 2.1, sy: 0.03, curve: 'hold' });
+    this.add({ shape: 'cylinder', mat: soft, x, y: gy + 0.1, z, life, s0: radius * 2, s1: radius * 2, sy: 0.004, curve: 'hold' });
+    this.add({ shape: 'cylinder', mat: soft, x, y: gy + 20, z, life, s0: 0.5, s1: 0.5, sy: 20, curve: 'hold' });
+    // shrinking pulse rings = "it is coming"
+    for (let t = 0; t < life - 0.3; t += 0.45) this.later(t, () => this.add({ shape: 'torus', mat: ring, x, y: gy + 0.3, z, life: 0.45, s0: radius * 2.4, s1: radius * 0.4, sy: 0.03 }));
+  }
+  bombFall(x, gy, z, dur) {
+    const sp = 70, y0 = gy + sp * dur;
+    this.add({ shape: 'box', mat: this.m.core, x, y: y0, z, vy: -sp, life: dur, s0: 0.4, s1: 0.4, sz: 3, align: true });
+    this.add({ mat: this.m.orange, x, y: y0, z, vy: -sp, life: dur, s0: 0.8, s1: 0.8, emit: (p) => this.add({ mat: this.m.smokeLight, x: p.x, y: p.y, z: p.z, life: 0.5, s0: 0.8, s1: 0, drag: 1 }), emitEvery: 0.03 });
+  }
+  bombBlast(x, gy, z) {
+    this.explosion(x, gy + 0.8, z, 2.6);
+    this.flash(x, gy, z, [1, 0.6, 0.25], 4, 0.3, 24);
+    this.add({ shape: 'torus', mat: this.m.ring, x, y: gy + 0.3, z, life: 0.4, s0: 1, s1: 7, sy: 0.05, curve: 'pop' });
+    this.add({ shape: 'plane', mat: this.m.scorch, x, y: gy + 0.05, z, life: 4, s0: 4.5, s1: 4.5, curve: 'hold', ry: rnd(0, 360) });
+  }
+  mineBlast(x, gy, z) {
+    this.explosion(x, gy + 0.6, z, 2.8);
+    this.flash(x, gy, z, [1, 0.5, 0.2], 5, 0.35, 24);
+    this.add({ shape: 'cylinder', mat: this.m.flashGlow, x, y: gy + 3, z, life: 0.3, s0: 2.2, s1: 0, sy: 3 });
+    this.add({ shape: 'plane', mat: this.m.scorch, x, y: gy + 0.05, z, life: 5, s0: 5, s1: 5, curve: 'hold', ry: rnd(0, 360) });
+  }
+  slamWave(x, gy, z, radius) {
+    const m = this.m;
+    this.flash(x, gy, z, [1, 0.75, 0.45], 7, 0.45, 30);
+    this.add({ shape: 'torus', mat: m.dustRing, x, y: gy + 0.2, z, life: 0.6, s0: 2, s1: radius * 2.4, sy: 0.25, curve: 'pop' });
+    this.add({ shape: 'torus', mat: m.ring, x, y: gy + 0.4, z, life: 0.4, s0: 2, s1: radius * 2.1, sy: 0.06, curve: 'pop' });
+    this.later(0.08, () => this.add({ shape: 'torus', mat: m.cyan, x, y: gy + 0.3, z, life: 0.45, s0: 1, s1: radius * 1.8, sy: 0.05, curve: 'pop' }));
+    this.add({ mat: m.whiteGlow, x, y: gy + 0.8, z, life: 0.12, s0: 3, s1: 6, curve: 'pop' });
+    for (let i = 0; i < this.n(16); i++) {
+      const a = rnd(0, 6.283), r = rnd(1, radius * 0.8);
+      this.add({ mat: m.dust, x: x + Math.cos(a) * r, y: gy + 0.3, z: z + Math.sin(a) * r, vx: Math.cos(a) * 8, vy: rnd(1, 4), vz: Math.sin(a) * 8, drag: 2.5, life: rnd(0.6, 1.0), s0: 0, s1: rnd(1.6, 2.6), curve: 'puff' });
+    }
+    for (let i = 0; i < this.n(14); i++) {
+      const a = rnd(0, 6.283), sp = rnd(6, 14);
+      this.add({ shape: 'box', mat: m.debris, x, y: gy + 0.3, z, vx: Math.cos(a) * sp, vy: rnd(7, 14), vz: Math.sin(a) * sp, g: 26, life: rnd(0.8, 1.3), s0: rnd(0.25, 0.5), s1: 0.15, spin: 8, floor: gy + 0.1 });
+    }
+    this.add({ shape: 'plane', mat: m.scorch, x, y: gy + 0.05, z, life: 5, s0: radius * 1.3, s1: radius * 1.3, curve: 'hold', ry: rnd(0, 360) });
+    this.addShake(0.9, x, gy, z);
+  }
+  // overdrive aura: rising sparks around the hull (per frame)
+  overdriveAura(x, y, z) {
+    if (Math.random() > 0.6 * this.scale + 0.15) return;
+    const a = rnd(0, 6.283), r = rnd(1.2, 2.2);
+    this.add({ shape: 'box', mat: Math.random() < 0.5 ? this.m.yellow : this.m.orange, x: x + Math.cos(a) * r, y: y + rnd(0, 1.2), z: z + Math.sin(a) * r, vy: rnd(3, 6), life: rnd(0.3, 0.5), s0: 0.18, s1: 0.02, align: true });
+  }
+  overdriveStart(x, y, z, own) {
+    this.flash(x, y, z, [1, 0.8, 0.3], own ? 2 : 4, 0.4, 20);
+    if (!own) this.add({ shape: 'cylinder', mat: this.m.flashGlow, x, y: y + 5, z, life: 0.45, s0: 3, s1: 0, sy: 6 });
+    for (let i = 0; i < this.n(14); i++) {
+      const a = rnd(0, 6.283), sp = rnd(5, 10);
+      this.add({ shape: 'box', mat: i % 2 ? this.m.yellow : this.m.orange, x, y: y + 0.6, z, vx: Math.cos(a) * sp, vy: rnd(3, 8), vz: Math.sin(a) * sp, g: 12, life: rnd(0.35, 0.6), s0: 0.2, s1: 0.03, align: true });
+    }
+    this.add({ shape: 'torus', mat: this.m.ring, x, y: y + 0.4, z, life: 0.4, s0: 8, s1: 1.5, sy: 0.08 });
+  }
+
   respawnBeam(x, y, z, colorMat) {
     this.add({ shape: 'cylinder', mat: colorMat || this.m.cyan, x, y: y + 12, z, life: 0.9, s0: 3.2, s1: 0, sy: 8 });
     this.add({ shape: 'cylinder', mat: this.m.core, x, y: y + 12, z, life: 0.4, s0: 0.5, s1: 0, sy: 48 });

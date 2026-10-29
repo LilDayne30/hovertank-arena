@@ -1,10 +1,11 @@
 // Authoritative match logic, independent of the network layer.
 // The Cloudflare Durable Object (worker/room.js) owns sockets and calls into this class.
 import {
-  C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate,
+  C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate, projectile, SHELL_KINDS,
 } from './sim.js';
+import { SIDE, ULT, ULT_MAX, ULT_GAIN, DEFAULT_LOADOUT, cleanLoadout, SIDEARMS, ULTS } from './abilities.js';
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
-import { BotBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel } from './bot.js';
+import { BotBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel, randomLoadout } from './bot.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -40,6 +41,7 @@ export class Game {
     this.phaseEnds = this.matchSeconds;
     this.acc = 0;
     this.healInterval = opts.healInterval || HEAL_INTERVAL;
+    this.ultRate = opts.ultRate || 1;   // dev/test only: faster special-meter gain (env ULT_RATE)
     this.heal = { active: false, nextAt: this.healInterval };
     this.queuedEvents = [];      // events raised outside step() (e.g. new game), sent with the next snapshot
     this.rules = cleanRules(opts.rules || DEFAULT_RULES);
@@ -48,6 +50,8 @@ export class Game {
     this.matchNo = 1;
     // CPU players: autoFill = quick-match rooms keep every empty seat filled with a bot;
     // otherwise rules.bots bots join (invite rooms). Bots never take a seat a human wants.
+    this.mines = []; this.mineId = 1;   // sidearm: mines on the ground
+    this.strikes = [];                  // special: scheduled air-strike bombs
     this.autoFill = !!opts.autoFill;
     this.waitSeconds = opts.waitSeconds ?? QM_WAIT;
     this.botSeq = 0;
@@ -96,12 +100,12 @@ export class Game {
       const name = pool[Math.floor(Math.random() * pool.length)] || `Player${100 + this.botSeq}`;
       const avg = this.humanLevel();
       const lv = Math.max(1, Math.min(50, Math.round(avg + (Math.random() * 6 - 3))));
-      const p = this.addPlayer(id, name, { bot: new BotBrain(this.botSkill(lv)) });
+      const p = this.addPlayer(id, name, { bot: new BotBrain(this.botSkill(lv)), loadout: randomLoadout() });
       p.prof = { lv, look: randomLook(lv), hidden: true };
       return p;
     }
     const name = BOT_NAMES.find((n) => !used.has(n)) || `ボット${this.botSeq + 1}`;
-    const p = this.addPlayer(id, name, { bot: new BotBrain(level) });
+    const p = this.addPlayer(id, name, { bot: new BotBrain(level), loadout: randomLoadout() });
     p.prof = { lv: 0, look: randomLook(), bot: true };
     return p;
   }
@@ -188,6 +192,7 @@ export class Game {
       kills: 0, deaths: 0, queue: [], lastSeq: 0, lastQueued: 0, credits: 0, dropped: 0,
       connected: true, spawnId: 0, team: 0,
       m: freshStats(), joinedAt: this.time, prof: null, bot: extra.bot || null,
+      loadout: cleanLoadout(extra.loadout || DEFAULT_LOADOUT),
     };
     // a fresh match starts when the first player arrives in an empty room
     // (quick match: first a short wait so people arriving together end up in the same match)
@@ -242,6 +247,15 @@ export class Game {
     if (p) { p.prof = prof; this.retuneBots(); this.sendRoster(); }
   }
 
+  // sidearm / special choice; takes effect at once (cooldown and meter are kept)
+  onLoadout(id, l) {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.loadout = cleanLoadout(l);
+    if (p.tank) { p.tank.side = p.loadout.side; p.tank.ultK = p.loadout.ult; }
+    this.sendRoster();
+  }
+
   onName(id, name) {
     const p = this.players.get(id);
     if (p) { p.name = sanitizeName(name) || p.name; this.sendRoster(); }
@@ -255,7 +269,8 @@ export class Game {
     this.heal = { active: false, nextAt: this.time + this.healInterval };
     this.matchStart = this.time;
     this.matchNo++;
-    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.m = freshStats(); p.joinedAt = this.time; this.spawn(p); }
+    this.mines.length = 0; this.strikes.length = 0;
+    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.m = freshStats(); p.joinedAt = this.time; if (p.tank) p.tank.ult = 0; this.spawn(p); }
     if (this.autoFill) this.syncBots();
   }
 
@@ -365,9 +380,11 @@ export class Game {
         p.credits -= 1;
         let inp = p.queue.shift();
         p.lastSeq = inp.seq;
-        if (this.phase !== 'play') inp = { ...inp, f: false };
+        if (this.phase !== 'play') inp = { ...inp, f: false, a: false, u: false };
         const t = p.tank;
         const ev = stepTank(t, inp, w);
+        this.abilityEvents(p, ev, events);
+        if (this.ultRate > 1) t.ult = Math.min(ULT_MAX, t.ult + ULT_GAIN.perSec * (this.ultRate - 1) * DT);
         if (this.phase === 'play') {
           p.m.moved += Math.hypot(t.vx, t.vz) * DT;
           if (ev.jumped) p.m.jumps++;
@@ -377,7 +394,7 @@ export class Game {
           p.m.shots++;
           // how the shot was fired (for missions): airborne, boosting, from the hill top
           const onHill = t.grounded && heightAt(w, t.x, t.z) > 2.0 && Math.hypot(t.x, t.z) < 7;
-          this.shells.push({ id: this.shellId++, owner: p.id, seq: t.shotSeq, ...muzzle(t), life: C.shellLife,
+          this.shells.push({ id: this.shellId++, owner: p.id, seq: ev.fireSeq, ...projectile(t, 'shell'),
             air: !t.grounded, turbo: t.boost > 0, hill: onHill, ox: t.x, oz: t.z });
           // spawn protection is for getting your bearings, not for attacking: shooting ends it
           if (this.time < p.invulnUntil) { p.invulnUntil = this.time; events.push({ t: 'unshield', v: p.id }); }
@@ -409,27 +426,44 @@ export class Game {
 
     for (let i = this.shells.length - 1; i >= 0; i--) {
       const s = this.shells[i];
-      const { hitGround } = stepShell(s, w);
+      const { hitGround, bounced } = stepShell(s, w);
+      if (bounced) events.push({ t: 'rico', s: s.id, o: s.owner, q: s.seq, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
       let dead = hitGround || s.life <= 0;
       if (!dead) {
         const owner = this.players.get(s.owner);
         for (const p of alive) {
           if (p.id === s.owner || !segmentHitsTank(s, p.tank)) continue;
           if (this.teamMode && owner && owner.team === p.team) continue;   // no friendly fire: shells pass through teammates
+          const hx = r2(s.x), hy = r2(s.y), hz = r2(s.z);
+          if (p.tank.shieldT > 0) {
+            if (p.tank.shieldAge <= SIDE.shield.perfect) {
+              // perfect guard: the shell turns around and now belongs to the defender
+              s.owner = p.id; s.vx = -s.vx; s.vy = -s.vy * 0.6 + 3; s.vz = -s.vz; s.life = Math.max(s.life, 2); s.x = s.px; s.y = s.py; s.z = s.pz;
+              s.ox = p.tank.x; s.oz = p.tank.z; s.air = false; s.turbo = false; s.hill = false;
+              events.push({ t: 'reflect', s: s.id, v: p.id, o: owner?.id, q: s.seq, x: hx, y: hy, z: hz });
+              break;
+            }
+            dead = true;
+            events.push({ t: 'block', o: s.owner, q: s.seq, v: p.id, x: hx, y: hy, z: hz });
+            break;
+          }
           dead = true;
-          if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: s.owner, q: s.seq, v: p.id, x: r2(s.x), y: r2(s.y), z: r2(s.z) }); break; }
-          p.hp -= C.damage;
-          if (owner) { owner.m.hits++; owner.m.dmg += C.damage; }
-          events.push({ t: 'hit', s: s.id, o: s.owner, q: s.seq, v: p.id, hp: Math.max(0, p.hp), x: r2(s.x), y: r2(s.y), z: r2(s.z) });
-          if (p.hp <= 0) this.kill(p, s.owner, events, s);
+          if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: s.owner, q: s.seq, v: p.id, x: hx, y: hy, z: hz }); break; }
+          const dmg = s.kind === 'mega' ? ULT.mega.direct : C.damage;
+          this.damage(p, dmg, s.owner, events, s, { s: s.id, q: s.seq, x: hx, y: hy, z: hz });
+          if (s.kind === 'mega') this.megaBlast(s, events, p.id);
           break;
         }
       }
       if (dead) {
-        if (hitGround || s.life <= 0) events.push({ t: 'boom', s: s.id, o: s.owner, q: s.seq, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
+        if (hitGround || s.life <= 0) {
+          events.push({ t: 'boom', s: s.id, o: s.owner, q: s.seq, k: s.kind === 'mega' ? 2 : undefined, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
+          if (s.kind === 'mega' && hitGround) this.megaBlast(s, events, null);
+        }
         this.shells.splice(i, 1);
       }
     }
+    if (this.phase === 'play') { this.stepMines(alive, events); this.stepStrikes(events); }
     // first-to-N kills: end as soon as a player (or team) reaches the target
     if (this.phase === 'play' && this.rules.goal === 'kills') {
       const best = this.teamMode ? Math.max(...this.teamKills()) : Math.max(0, ...[...this.players.values()].map((p) => p.kills));
@@ -438,12 +472,124 @@ export class Game {
     this.broadcastSnapshot(events);
   }
 
+  // one hit of damage (shell, blast...) with stats, special-meter gain, hit event and kill
+  damage(p, dmg, ownerId, events, info, ev) {
+    if (!p.alive) return;
+    p.hp -= dmg;
+    const owner = this.players.get(ownerId);
+    if (owner) { owner.m.hits++; owner.m.dmg += dmg; if (owner.tank) owner.tank.ult = Math.min(ULT_MAX, owner.tank.ult + ULT_GAIN.hit); }
+    events.push({ t: 'hit', o: ownerId, v: p.id, hp: Math.max(0, p.hp), d: dmg, ...ev });
+    if (p.hp <= 0) this.kill(p, ownerId, events, info);
+  }
+
+  // area damage with fall-off and knockback (mines, air strike, slam, mega cannon splash)
+  blast(x, y, z, radius, [dmax, dmin], ownerId, events, { kb = 0, skip = null, kind } = {}) {
+    const owner = this.players.get(ownerId);
+    for (const p of this.players.values()) {
+      if (!p.alive || !p.connected || p.id === ownerId || p.id === skip) continue;
+      if (this.teamMode && owner && owner.team === p.team) continue;
+      const t = p.tank, d = Math.hypot(t.x - x, t.y + C.hitCenterY - y, t.z - z);
+      if (d > radius + C.hitRadius * 0.6) continue;
+      const f = Math.min(1, d / radius);
+      const ex = r2(t.x), ey = r2(t.y + C.hitCenterY), ez = r2(t.z);
+      if (t.shieldT > 0) { events.push({ t: 'block', o: ownerId, v: p.id, x: ex, y: ey, z: ez }); continue; }
+      if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: ownerId, v: p.id, x: ex, y: ey, z: ez }); continue; }
+      if (kb) {
+        const hx = t.x - x, hz = t.z - z, hl = Math.hypot(hx, hz) || 1, k = kb * (1 - f * 0.6);
+        t.vx += (hx / hl) * k; t.vz += (hz / hl) * k; t.vy = Math.max(t.vy, k * 0.5); t.grounded = false;
+      }
+      this.damage(p, Math.round(dmax + (dmin - dmax) * f), ownerId, events, { ox: x, oz: z }, { x: ex, y: ey, z: ez, k: kind });
+    }
+  }
+
+  megaBlast(s, events, skip) {
+    const U = ULT.mega;
+    this.blast(s.x, s.y, s.z, U.radius, U.splash, s.owner, events, { kb: 9, skip, kind: 'mega' });
+    events.push({ t: 'mega', o: s.owner, q: s.seq, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
+  }
+
+  // what a sidearm / special does on the server (movement parts already happened in stepTank)
+  abilityEvents(p, ev, events) {
+    const t = p.tank, w = this.world;
+    if (ev.side) {
+      events.push({ t: 'side', v: p.id, k: ev.side });
+      if (ev.side === 'bounce') this.shells.push({ id: this.shellId++, owner: p.id, seq: ev.sideSeq, ...projectile(t, 'bounce'), air: !t.grounded, turbo: t.boost > 0, ox: t.x, oz: t.z });
+      if (ev.side === 'mine') {
+        const M = SIDE.mine, fx = -Math.sin(t.yaw), fz = -Math.cos(t.yaw);
+        let mx = t.x - fx * 2.8, mz = t.z - fz * 2.8;
+        if (heightAt(w, mx, mz) - (t.y - C.hoverHeight) > C.stepMax) { mx = t.x; mz = t.z; }
+        const mine = { id: this.mineId++, owner: p.id, team: p.team, x: mx, y: heightAt(w, mx, mz), z: mz, armAt: this.time + M.arm, until: this.time + M.life };
+        const mineOwn = this.mines.filter((m) => m.owner === p.id);
+        if (mineOwn.length >= M.max) this.mines.splice(this.mines.indexOf(mineOwn[0]), 1);
+        this.mines.push(mine);
+      }
+    }
+    if (ev.ult) {
+      events.push({ t: 'ult', v: p.id, k: ev.ult });
+      if (ev.ult === 'mega') this.shells.push({ id: this.shellId++, owner: p.id, seq: ev.ultSeq, ...projectile(t, 'mega'), air: !t.grounded, turbo: t.boost > 0, ox: t.x, oz: t.z });
+      if (ev.ult === 'strike') {
+        // target = where a normal shell fired with the current aim would land (the crosshair point)
+        // (stops at the first enemy tank on the way, like a real shell would)
+        const sh = { ...projectile(t, 'shell') };
+        const foes = [...this.players.values()].filter((o) => o !== p && o.alive && !(this.teamMode && o.team === p.team));
+        for (let i = 0; i < 90 && sh.life > 0; i++) {
+          if (stepShell(sh, w).hitGround) break;
+          const hit = foes.find((o) => segmentHitsTank(sh, o.tank));
+          if (hit) { sh.x = hit.tank.x; sh.z = hit.tank.z; break; }
+        }
+        const U = ULT.strike, bombs = [];
+        for (let i = 0; i < U.bombs; i++) {
+          const a = Math.random() * Math.PI * 2, r = U.spread * Math.sqrt(Math.random()) * (i === 0 ? 0 : 1);
+          bombs.push({ x: sh.x + Math.cos(a) * r, z: sh.z + Math.sin(a) * r, at: this.time + U.delay + (U.span * i) / (U.bombs - 1) });
+        }
+        this.strikes.push({ owner: p.id, bombs });
+        events.push({ t: 'strike', o: p.id, x: r2(sh.x), z: r2(sh.z), b: bombs.map((b) => [r2(b.x), r2(b.z), r2(b.at - this.time)]) });
+      }
+    }
+    if (ev.slam) {
+      const U = ULT.slam;
+      this.blast(t.x, t.y, t.z, U.radius, U.damage, p.id, events, { kb: U.kb, kind: 'slam' });
+      events.push({ t: 'slam', v: p.id, x: r2(t.x), y: r2(t.y - C.hoverHeight), z: r2(t.z) });
+    }
+  }
+
+  stepMines(alive, events) {
+    const M = SIDE.mine;
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const m = this.mines[i];
+      if (this.time > m.until || !this.players.has(m.owner)) { this.mines.splice(i, 1); continue; }
+      if (this.time < m.armAt) continue;
+      const near = alive.find((p) => p.id !== m.owner && !(this.teamMode && p.team === m.team) && Math.hypot(p.tank.x - m.x, p.tank.z - m.z) < M.trigger && Math.abs(p.tank.y - C.hoverHeight - m.y) < 2.5);
+      if (!near) continue;
+      this.mines.splice(i, 1);
+      this.blast(m.x, m.y + 0.6, m.z, M.radius, M.damage, m.owner, events, { kb: 8, kind: 'mine' });
+      events.push({ t: 'mineboom', o: m.owner, x: r2(m.x), y: r2(m.y), z: r2(m.z) });
+    }
+  }
+
+  stepStrikes(events) {
+    const U = ULT.strike, w = this.world;
+    for (let i = this.strikes.length - 1; i >= 0; i--) {
+      const st = this.strikes[i];
+      for (let j = st.bombs.length - 1; j >= 0; j--) {
+        const b = st.bombs[j];
+        if (this.time < b.at) continue;
+        st.bombs.splice(j, 1);
+        const y = heightAt(w, b.x, b.z);
+        this.blast(b.x, y + 0.8, b.z, U.radius, U.damage, st.owner, events, { kb: 6, kind: 'bomb' });
+        events.push({ t: 'bomb', o: st.owner, x: r2(b.x), y: r2(y), z: r2(b.z) });
+      }
+      if (!st.bombs.length) this.strikes.splice(i, 1);
+    }
+  }
+
   kill(p, killerId, events, shell) {
     p.alive = false; p.hp = 0; p.deaths++; p.m.deaths++;
     p.respawnAt = this.time + C.respawnTime;
     const k = this.players.get(killerId);
     if (k && !(this.teamMode && k.team === p.team)) {
       k.kills++; k.m.kills++;
+      if (k.tank) k.tank.ult = Math.min(ULT_MAX, k.tank.ult + ULT_GAIN.kill);
       if (shell) {
         if (shell.air) k.m.air++;
         if (shell.turbo) k.m.turboKills++;
@@ -470,7 +616,8 @@ export class Game {
       }
     }
     const t = newTank(best.x, best.z, best.yaw, heightAt(w, best.x, best.z));
-    if (p.tank) t.shotSeq = p.tank.shotSeq;
+    if (p.tank) { t.shotSeq = p.tank.shotSeq; t.ult = p.tank.ult; }   // the special meter survives a respawn
+    t.side = p.loadout.side; t.ultK = p.loadout.ult;
     p.tank = t;
     p.hp = C.maxHp; p.alive = true;
     p.invulnUntil = this.time + C.spawnInvuln;
@@ -486,12 +633,14 @@ export class Game {
         p.hp, flags, p.lastSeq, r3(t.cooldown), t.shotSeq, p.kills, p.deaths, p.spawnId,
         p.alive ? 0 : Math.max(0, Math.round((p.respawnAt - this.time) * 10) / 10),
         r3(t.charge), r3(t.boost), t.boostLvl,
-        this.time < p.invulnUntil ? Math.round((p.invulnUntil - this.time) * 10) / 10 : 0]);
+        this.time < p.invulnUntil ? Math.round((p.invulnUntil - this.time) * 10) / 10 : 0,
+        r2(t.sideCd), Math.floor(t.ult), r3(t.shieldT), r3(t.shieldAge), r3(t.odT), t.slam, SIDE[t.side].index, ULT[t.ultK].index, r3(t.dashT)]);
     }
-    const B = this.shells.map((s) => [s.id, s.owner, s.seq, r2(s.x), r2(s.y), r2(s.z), r2(s.vx), r2(s.vy), r2(s.vz)]);
+    const B = this.shells.map((s) => [s.id, s.owner, s.seq, r2(s.x), r2(s.y), r2(s.z), r2(s.vx), r2(s.vy), r2(s.vz), SHELL_KINDS.indexOf(s.kind), s.bounce || 0]);
+    const MN = this.mines.map((m) => [m.id, m.owner, r2(m.x), r2(m.y), r2(m.z), this.time >= m.armAt ? 1 : 0]);
     this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Math.max(0, Math.round(this.phaseEnds - this.time)), p: P, b: B, e: events,
       hl: this.heal.active ? 1 : 0, hn: this.heal.active ? 0 : Math.max(0, Math.ceil(this.heal.nextAt - this.time)),
-      tk: this.teamMode ? this.teamKills() : undefined });
+      tk: this.teamMode ? this.teamKills() : undefined, mn: MN.length ? MN : undefined });
   }
 
   scoreboard() {
@@ -504,7 +653,7 @@ export class Game {
     this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
       id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
       // private rooms label CPU players; quick-match bots look like everyone else
-      bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined,
+      bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined, lo: p.loadout,
     })) });
   }
 }

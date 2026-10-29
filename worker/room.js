@@ -31,7 +31,7 @@ export class BattleRoom extends DurableObject {
       broadcast: (type, data) => this.broadcast(type, data),
       matchEnd: (summary) => this.awardMatch(summary),
       phase: () => this.report(),   // quick match: tell the matchmaker when the room opens / closes
-    }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined });
+    }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
   }
 
   async fetch(request) {
@@ -125,6 +125,7 @@ export class BattleRoom extends DurableObject {
       }
       else if (type === 'team') this.game.onSwitchTeam(id);
       else if (type === 'prof') this.attachProfile(id, data);
+      else if (type === 'loadout') this.game.onLoadout(id, data);
       else if (type === 'look') { const p = this.game.players.get(id); if (p?.prof) this.attachProfile(id, null, p.prof.key); }
       else if (type === 'leave') this.drop(id, ws, true);
     });

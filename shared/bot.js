@@ -4,6 +4,9 @@
 import { C, DT, heightAt, solveAim, wrapPi, clamp } from './sim.js';
 import { PIT_HALF, HEAL_POS } from './arena.js';
 import { ITEMS, SLOTS, DEFAULT_LOOK, owned } from './progress.js';
+import { SIDEARMS, ULTS, ULT_MAX } from './abilities.js';
+
+export const randomLoadout = () => ({ side: pick(SIDEARMS).id, ult: pick(ULTS).id });
 
 // strength presets: aimErr = spread of the aim point in metres (grows with range), reaction time, turret turn speed, how eagerly it shoots, etc.
 export const BOT_LEVELS = {
@@ -199,6 +202,41 @@ export class BotBrain {
       }
       if (Math.random() < P.jumpRand * DT) inp.j = true;
     }
+
+    // ------------------------------------------------ sidearm / special (simple, strength-scaled habits)
+    const skill = this.skill;
+    const incoming = this.incomingShell(me, game, 0.35);
+    if (t.sideCd <= 0) {
+      if (t.side === 'dash' && incoming && Math.random() < 0.15 + skill * 0.5) {
+        // sidestep the shell
+        const sx = -incoming.vz, sz = incoming.vx, sl = Math.hypot(sx, sz) || 1, side = Math.random() < 0.5 ? 1 : -1;
+        inp.mx = (sx / sl) * side; inp.mz = (sz / sl) * side; inp.a = true;
+      } else if (t.side === 'dash' && tgt && dist > P.pref + 18 && Math.random() < 0.01) inp.a = true;
+      else if (t.side === 'shield' && incoming && incoming.eta < 0.05 + skill * 0.25 && Math.random() < 0.2 + skill * 0.6) inp.a = true;
+      else if (t.side === 'mine' && tgt && dist < 22 && Math.random() < 0.02) inp.a = true;
+      else if (t.side === 'bounce' && tgt && this.vis && aligned && dist < P.range && Math.random() < P.fire * 0.5) inp.a = true;
+    }
+    if (t.ult >= ULT_MAX && tgt && this.vis && !shieldUp) {
+      const k = t.ultK;
+      if (k === 'overdrive' && dist < 50) inp.u = true;
+      else if ((k === 'mega' || k === 'strike') && aligned && dist > 12 && dist < 70 && Math.random() < 0.3) inp.u = true;
+      else if (k === 'slam' && dist < 8) inp.u = true;
+    }
     return inp;
+  }
+
+  // the nearest enemy shell that will pass close to us soon: { vx, vz, eta } or null
+  incomingShell(me, game, within) {
+    const t = me.tank;
+    let best = null;
+    for (const s of game.shells) {
+      if (s.owner === me.id) continue;
+      const rx = t.x - s.x, rz = t.z - s.z, sp = Math.hypot(s.vx, s.vz) || 1;
+      const along = (rx * s.vx + rz * s.vz) / sp, eta = along / sp;
+      if (eta < 0 || eta > within) continue;
+      if (Math.abs(rx * s.vz - rz * s.vx) / sp > 2.4) continue;
+      if (!best || eta < best.eta) best = { vx: s.vx, vz: s.vz, eta };
+    }
+    return best;
   }
 }

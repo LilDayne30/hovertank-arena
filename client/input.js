@@ -10,6 +10,7 @@ export class Input {
     this.lookDX = 0; this.lookDY = 0;  // accumulated look delta (radians) since last read
     this.fire = false; this.drift = false;
     this.jumpQueued = false;
+    this.sideQueued = false; this.ultQueued = false;   // latched until the next sample (a tap never gets lost)
     this.touchMode = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
     this.mouseSens = 0.0025;
     this.touchSens = 0.0065;
@@ -24,9 +25,10 @@ export class Input {
     this.lookDX = this.lookDY = 0;
     this.fire = this.drift = false;
     this.jumpQueued = false;
+    this.sideQueued = this.ultQueued = false;
     this.touches.clear();
     this.ui.stickKnob && (this.ui.stickBase.style.display = 'none');
-    for (const b of [this.ui.btnFire, this.ui.btnJump, this.ui.btnDrift]) b?.classList.remove('down');
+    for (const b of [this.ui.btnFire, this.ui.btnJump, this.ui.btnDrift, this.ui.btnSide, this.ui.btnUlt]) b?.classList.remove('down');
   }
 
   bind() {
@@ -41,6 +43,8 @@ export class Input {
       const k = e.code;
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
       if (k === 'Space' && !e.repeat) this.jumpQueued = true;
+      if (k === 'KeyE' && !e.repeat) this.sideQueued = true;
+      if (k === 'KeyQ' && !e.repeat) this.ultQueued = true;
       this.keys.add(k);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -49,8 +53,12 @@ export class Input {
       if (document.pointerLockElement !== this.canvas) { this.canvas.requestPointerLock?.(); return; }
       if (e.button === 0) this.fire = true;
       if (e.button === 2) this.drift = true;
+      if (e.button === 3 || e.button === 4) this.sideQueued = true;   // mouse side buttons
     });
-    window.addEventListener('mouseup', (e) => { if (e.button === 0) this.fire = false; if (e.button === 2) this.drift = false; });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button === 0) this.fire = false; if (e.button === 2) this.drift = false;
+      if ((e.button === 3 || e.button === 4) && document.pointerLockElement === this.canvas) e.preventDefault();   // no browser back / forward mid-game
+    });
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
       if (document.pointerLockElement !== this.canvas) { this.fire = false; this.drift = false; this.keys.clear(); }
@@ -79,6 +87,8 @@ export class Input {
     if (target.closest?.('#btn-fire')) return 'fire';
     if (target.closest?.('#btn-jump')) return 'jump';
     if (target.closest?.('#btn-drift')) return 'drift';
+    if (target.closest?.('#btn-side')) return 'side';
+    if (target.closest?.('#btn-ult')) return 'ult';
     return x < window.innerWidth * 0.42 ? 'stick' : 'look';
   }
 
@@ -100,6 +110,8 @@ export class Input {
       if (r === 'fire') { this.fire = true; this.ui.btnFire.classList.add('down'); }
       if (r === 'jump') { this.jumpQueued = true; this.ui.btnJump.classList.add('down'); }
       if (r === 'drift') { this.drift = true; this.ui.btnDrift.classList.add('down'); }
+      if (r === 'side') { this.sideQueued = true; this.ui.btnSide.classList.add('down'); }
+      if (r === 'ult') { this.ultQueued = true; this.ui.btnUlt.classList.add('down'); }
     }
   }
 
@@ -135,6 +147,8 @@ export class Input {
       if (s.role === 'fire') { this.fire = false; this.ui.btnFire.classList.remove('down'); }
       if (s.role === 'jump') this.ui.btnJump.classList.remove('down');
       if (s.role === 'drift') { this.drift = false; this.ui.btnDrift.classList.remove('down'); }
+      if (s.role === 'side') this.ui.btnSide.classList.remove('down');
+      if (s.role === 'ult') this.ui.btnUlt.classList.remove('down');
     }
     // safety net: if the browser lost track of fingers, clear everything
     if (e.touches && e.touches.length === 0 && this.touches.size) this.reset();
@@ -151,7 +165,9 @@ export class Input {
     }
     const drift = this.drift || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     const jump = this.jumpQueued; this.jumpQueued = false;
-    return { mx, my, drift, jump, fire: this.fire || this.keys.has('KeyF') };
+    const side = this.sideQueued; this.sideQueued = false;
+    const ult = this.ultQueued; this.ultQueued = false;
+    return { mx, my, drift, jump, side, ult, fire: this.fire || this.keys.has('KeyF') };
   }
 
   takeLook() {

@@ -28,6 +28,12 @@ const srv = http.createServer((q, r) => { const f = path.join(root, q.url === '/
       ['heal appears', (s) => s.healSpawn()], ['heal (you)', (s) => s.heal(null, true)],
       ['respawn', (s) => s.respawn(null, true)], ['ui click', (s) => s.click()], ['match start horn', (s) => s.horn()],
       ['win', (s) => s.matchEnd('win')], ['lose', (s) => s.matchEnd('lose')], ['level up', (s) => s.levelUp()],
+      ['dash', (s) => s.dash(null, true)], ['shield up', (s) => s.shieldUp(null, true)], ['reflect', (s) => s.reflect(null, true)],
+      ['ricochet 10 m', (s) => s.rico({ x: 0, y: 0, z: -10 })], ['mine place', (s) => s.minePlace(null, true)],
+      ['mega fire', (s) => s.megaFire(null, true)], ['mega blast 20 m', (s) => s.bigBoom({ x: 0, y: 0, z: -20 }, 1.8)],
+      ['overdrive', (s) => s.overdrive(null, true)], ['strike call (enemy)', (s) => s.strikeCall(null, false, true)],
+      ['bomb whistle 10 m', (s) => s.bombWhistle({ x: 0, y: 0, z: -10 }, 0.6)], ['slam jump', (s) => s.slamJump(null, true)],
+      ['slam', (s) => s.slam(null, true)], ['ready side', (s) => s.readyPing('side')], ['ready ult', (s) => s.readyPing('ult')],
     ];
     const gap = 1.6, musicStart = list.length * gap + 0.5, bars = 2;
     const musicModes = [['lobby', false], ['battle', false], ['battle', true]];

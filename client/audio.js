@@ -251,6 +251,99 @@ export class Sound {
     this.noise(node, { type: 'highpass', f0: 7000, t: 0.48, dur: 1.0, gain: 0.12, a: 0.05 });
   }
 
+  // ------------------------------------------------------------------ sidearms / specials
+  dash(pos, own) {
+    if (!this.ready || !this.voice(600)) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.8 : 0.65, verb: 0.25, drive: true });
+    this.noise(node, { type: 'bandpass', f0: 600, f1: 5200, q: 1.4, dur: 0.32, gain: 0.9 });
+    this.tone(node, { type: 'sawtooth', f0: 320, f1: 1500, dur: 0.18, gain: 0.3 });
+    this.tone(node, { f0: 120, f1: 50, dur: 0.18, gain: 0.7 });
+  }
+  shieldUp(pos, own) {
+    if (!this.ready || !this.voice(700)) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.6 : 0.5, verb: 0.5 });
+    this.tone(node, { type: 'sawtooth', f0: 220, f1: 1760, dur: 0.22, gain: 0.25 });
+    this.tone(node, { type: 'triangle', f0: 1760, t: 0.18, dur: 0.5, gain: 0.3 });
+    this.noise(node, { type: 'highpass', f0: 5000, dur: 0.4, gain: 0.2 });
+  }
+  reflect(pos, own) {   // perfect guard: bright "ting" + whoosh back
+    if (!this.ready) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.8 : 0.6, verb: 0.7 });
+    this.tone(node, { type: 'triangle', f0: 2637, dur: 0.5, gain: 0.55 });
+    this.tone(node, { type: 'triangle', f0: 3951, t: 0.04, dur: 0.45, gain: 0.35 });
+    this.tone(node, { type: 'square', f0: 1318, f1: 1320, dur: 0.12, gain: 0.2 });
+    this.noise(node, { type: 'bandpass', f0: 5000, f1: 700, q: 2, t: 0.05, dur: 0.35, gain: 0.5 });
+  }
+  rico(pos) {
+    if (!this.ready || !this.voice(300)) return;
+    const { node } = this.out({ pos, gain: 0.55, verb: 0.3 });
+    this.tone(node, { type: 'triangle', f0: 2400, f1: 900, dur: 0.22, gain: 0.45 });
+    this.noise(node, { type: 'bandpass', f0: 3500, q: 3, dur: 0.08, gain: 0.5 });
+  }
+  minePlace(pos, own) {
+    if (!this.ready || !this.voice(400)) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.5 : 0.35 });
+    this.tone(node, { f0: 180, f1: 90, dur: 0.12, gain: 0.7 });
+    this.tone(node, { type: 'square', f0: 1200, t: 0.12, dur: 0.06, gain: 0.15 });
+    this.tone(node, { type: 'square', f0: 1600, t: 0.22, dur: 0.06, gain: 0.15 });
+  }
+  megaFire(pos, own) {
+    if (!this.ready) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 1.1 : 1.0, verb: 0.8, drive: true });
+    this.tone(node, { type: 'sawtooth', f0: 90, f1: 1800, dur: 0.25, gain: 0.25, curve: 'lin' });   // charge whine
+    this.tone(node, { f0: 140, f1: 26, t: 0.02, dur: 0.8, gain: 1.0 });
+    this.noise(node, { f0: 6000, f1: 180, t: 0.02, dur: 0.9, gain: 1.0 });
+    this.noise(node, { type: 'highpass', f0: 2000, t: 0.02, dur: 0.12, gain: 0.8 });
+  }
+  bigBoom(pos, size = 1.6) {   // mega cannon / mine / slam: a bigger, longer boom
+    if (!this.ready || !this.voice(1800)) return;
+    const { node, g } = this.out({ pos, gain: 0.9 * Math.min(1.4, size), verb: 0.9, drive: true });
+    if (g < 0.02) return;
+    this.tone(node, { f0: 80, f1: 22, dur: 1.1 * size * 0.7, gain: 1.0 });
+    this.noise(node, { f0: 4200, f1: 90, dur: 1.2 * size * 0.7, gain: 1.0 });
+    for (let i = 0; i < 9; i++) this.noise(node, { type: 'bandpass', f0: 1000 + Math.random() * 3000, q: 3, t: 0.05 + Math.random() * 0.7, dur: 0.05, gain: 0.35 });
+  }
+  overdrive(pos, own) {
+    if (!this.ready) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.75 : 0.55, verb: 0.6, drive: true });
+    this.tone(node, { type: 'sawtooth', f0: 110, f1: 880, dur: 0.6, gain: 0.35, curve: 'lin' });
+    this.tone(node, { type: 'sawtooth', f0: 165, f1: 1320, dur: 0.6, gain: 0.2, curve: 'lin' });
+    this.noise(node, { type: 'bandpass', f0: 400, f1: 6000, q: 1, dur: 0.7, gain: 0.5 });
+    if (own) [76, 83, 88].forEach((m, i) => this.tone(node, { type: 'square', f0: NOTE(m), t: 0.55 + i * 0.06, dur: 0.2, gain: 0.18 }));
+  }
+  strikeCall(pos, own, enemy) {   // radio beeps + rising siren (a warning for whoever is under it)
+    if (!this.ready) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: enemy ? 0.8 : 0.55, verb: 0.4 });
+    [0, 0.14].forEach((t) => this.tone(node, { type: 'square', f0: 1400, t, dur: 0.08, gain: 0.2 }));
+    this.tone(node, { type: 'sawtooth', f0: 400, f1: 900, t: 0.3, dur: 0.9, gain: 0.18, curve: 'lin' });
+  }
+  bombWhistle(pos, dur) {
+    if (!this.ready || !this.voice((dur + 0.1) * 1000)) return;
+    const { node, g } = this.out({ pos, gain: 0.45, verb: 0.3 });
+    if (g < 0.03) return;
+    this.tone(node, { f0: 2200, f1: 500, dur, a: 0.05, gain: 0.25, curve: 'lin' });
+  }
+  slamJump(pos, own) {
+    if (!this.ready || !this.voice(600)) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: own ? 0.7 : 0.55, verb: 0.3 });
+    this.noise(node, { type: 'bandpass', f0: 300, f1: 3000, q: 1.2, dur: 0.45, gain: 0.7 });
+    this.tone(node, { type: 'sawtooth', f0: 120, f1: 600, dur: 0.4, gain: 0.25 });
+  }
+  slam(pos, own) {
+    if (!this.ready) return;
+    const { node } = this.out({ pos: own ? null : pos, gain: 1.1, verb: 1.0, drive: true });
+    this.tone(node, { f0: 70, f1: 18, dur: 1.2, gain: 1.0 });
+    this.tone(node, { type: 'square', f0: 55, f1: 25, dur: 0.4, gain: 0.4 });
+    this.noise(node, { f0: 2500, f1: 60, dur: 1.3, gain: 1.0 });
+    this.noise(node, { type: 'highpass', f0: 1500, dur: 0.1, gain: 0.7 });
+  }
+  readyPing(kind) {   // your sidearm / special became ready again
+    if (!this.ready) return;
+    const { node } = this.out({ gain: 0.35 });
+    if (kind === 'ult') [72, 79, 84, 91].forEach((m, i) => this.tone(node, { type: 'triangle', f0: NOTE(m), t: i * 0.06, dur: 0.35, gain: 0.35 }));
+    else this.tone(node, { type: 'triangle', f0: NOTE(88), dur: 0.12, gain: 0.3 });
+  }
+
   // ------------------------------------------------------------------ continuous: engine, drift screech, jet
   startEngine() {
     const c = this.ctx;

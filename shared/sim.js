@@ -1,3 +1,5 @@
+import { SIDE, ULT, ULT_MAX, ULT_GAIN, SIDEARMS, ULTS } from './abilities.js';
+
 // Shared deterministic-ish simulation used by both server (authoritative) and client (prediction).
 // Units: metres, seconds, radians. Y is up. Yaw 0 faces -Z (PlayCanvas forward).
 
@@ -141,6 +143,14 @@ export function newTank(x, z, yaw, groundY) {
     boost: 0,            // remaining boost time (s)
     boostLvl: 0,
     drifting: false,     // DRIFT was held last tick (release detection)
+    // abilities (see shared/abilities.js)
+    side: 'dash', ultK: 'overdrive',   // loadout
+    sideCd: 0,           // sidearm cooldown left (s)
+    ult: 0,              // special meter 0..ULT_MAX
+    dashT: 0,            // dash speed-cap window (s)
+    shieldT: 0, shieldAge: 9,   // reflect shield time left / time since raised
+    odT: 0,              // overdrive time left
+    slam: 0,             // 0 none, 1 rising, 2 diving
   };
 }
 
@@ -158,13 +168,20 @@ export function cleanInput(i) {
     ay: wrapPi(+i.ay || 0),
     ap: clamp(+i.ap || 0, C.aimPitchMin, C.aimPitchMax),
     j: !!i.j, d: !!i.d, f: !!i.f,
+    a: !!i.a, u: !!i.u,   // sidearm / special (pressed this tick)
   };
 }
 
 // Advance one tank by one tick. Returns {fired:boolean, jumped:boolean, landed:boolean}.
 export function stepTank(t, inp, w, dt = DT) {
-  const ev = { fired: false, jumped: false, landed: false, boost: 0, sliding: false };
+  const ev = { fired: false, jumped: false, landed: false, boost: 0, sliding: false, side: null, ult: null, slam: false };
   t.aimYaw = inp.ay; t.aimPitch = inp.ap;
+  const OD = t.odT > 0 ? ULT.overdrive : null;
+  t.odT = Math.max(0, t.odT - dt);
+  t.sideCd = Math.max(0, t.sideCd - dt);
+  t.dashT = Math.max(0, t.dashT - dt);
+  if (t.shieldT > 0) { t.shieldT = Math.max(0, t.shieldT - dt); t.shieldAge += dt; }
+  t.ult = Math.min(ULT_MAX, t.ult + ULT_GAIN.perSec * dt);
 
   const mag = Math.hypot(inp.mx, inp.mz);
   const fwdX = -Math.sin(t.yaw), fwdZ = -Math.cos(t.yaw);
@@ -182,7 +199,7 @@ export function stepTank(t, inp, w, dt = DT) {
   if (mag > 0.05) {
     const dirX = inp.mx / mag, dirZ = inp.mz / mag;
     const align = Math.max(0.2, dirX * fwdX + dirZ * fwdZ);
-    const a = C.accel * mag * align * (t.grounded ? 1 : C.airControl) * dt;
+    const a = C.accel * (OD ? OD.accelMul : 1) * mag * align * (t.grounded ? 1 : C.airControl) * dt;
     // blend thrust toward the stick direction a little so it feels responsive
     t.vx += (fwdX * 0.75 + dirX * 0.25) * a;
     t.vz += (fwdZ * 0.75 + dirZ * 0.25) * a;
@@ -193,7 +210,7 @@ export function stepTank(t, inp, w, dt = DT) {
   let vl = t.vx * rightX + t.vz * rightZ;
   if (t.grounded) {
     vf *= Math.exp(-C.dragFwd * dt);
-    vl *= Math.exp(-(inp.d ? C.gripDrift : C.gripSide) * dt);
+    vl *= Math.exp(-(inp.d || t.dashT > 0 ? C.gripDrift : C.gripSide) * dt);   // a dash slides sideways too
   } else {
     vf *= Math.exp(-C.airDrag * dt);
     vl *= Math.exp(-C.airDrag * dt);
@@ -204,7 +221,7 @@ export function stepTank(t, inp, w, dt = DT) {
   // drift mini-turbo: charge while actually sliding, fire the boost when DRIFT is released
   const speed = Math.hypot(t.vx, t.vz);
   ev.sliding = inp.d && t.grounded && speed > C.driftMinSpeed && Math.abs(vl) > C.driftMinSlide;
-  if (ev.sliding) t.charge = Math.min(C.charge2 + 0.2, t.charge + dt);
+  if (ev.sliding) t.charge = Math.min(C.charge2 + 0.2, t.charge + dt * (OD ? OD.chargeMul : 1));
   if (!inp.d && t.drifting) {
     const lvl = t.charge >= C.charge2 ? 2 : t.charge >= C.charge1 ? 1 : 0;
     if (lvl) {
@@ -219,13 +236,43 @@ export function stepTank(t, inp, w, dt = DT) {
   }
   if (!inp.d && !t.drifting) t.charge = 0;
   t.drifting = inp.d;
-  let cap = C.maxSpeed;
+  let cap = C.maxSpeed * (OD ? OD.speedMul : 1);
   if (t.boost > 0) {
     t.boost = Math.max(0, t.boost - dt);
-    cap = C.boostSpeed[t.boostLvl];
+    cap = C.boostSpeed[t.boostLvl] * (OD ? OD.speedMul : 1);
     t.vx += fwdX * C.boostAccel * dt; t.vz += fwdZ * C.boostAccel * dt;
     if (t.boost === 0) t.boostLvl = 0;
   }
+  // ---- sidearm (press)
+  if (inp.a && t.sideCd <= 0) {
+    const S = SIDE[t.side] || SIDEARMS[0];
+    t.sideCd = S.cd; ev.side = S.id;
+    if (S.id === 'dash') {
+      // burst towards the stick (or hull forward), keeps most of the current momentum
+      let dx = inp.mx, dz = inp.mz; const m2 = Math.hypot(dx, dz);
+      if (m2 < 0.3) { dx = fwdX; dz = fwdZ; } else { dx /= m2; dz /= m2; }
+      const along = t.vx * dx + t.vz * dz;
+      t.vx = t.vx * 0.35 + dx * (Math.max(0, along) * 0.65 + S.speed);
+      t.vz = t.vz * 0.35 + dz * (Math.max(0, along) * 0.65 + S.speed);
+      if (!t.grounded && t.vy < 2) t.vy = 2;   // an air dash floats you a little
+      t.dashT = S.time;
+    } else if (S.id === 'shield') { t.shieldT = S.dur; t.shieldAge = 0; }
+    else if (S.id === 'bounce') { t.shotSeq++; ev.sideSeq = t.shotSeq; }   // a projectile (spawned by the caller)
+    // mine: placed by the caller (server) behind the hull
+  }
+  // ---- special (press, meter full)
+  if (inp.u && t.ult >= ULT_MAX) {
+    const U = ULT[t.ultK] || ULTS[0];
+    t.ult = 0; ev.ult = U.id;
+    if (U.id === 'overdrive') t.odT = U.dur;
+    else if (U.id === 'mega') { t.shotSeq++; ev.ultSeq = t.shotSeq; }
+    else if (U.id === 'slam') {
+      if (t.grounded) { t.vy = U.jump; t.grounded = false; t.slam = 1; ev.jumped = true; }
+      else { t.slam = 2; t.vy = Math.min(t.vy, U.dive); }
+    }
+  }
+  if (t.dashT > 0) cap = Math.max(cap, SIDE.dash.cap);
+
   const hs = Math.hypot(t.vx, t.vz);
   if (hs > cap) {
     // above the cap (e.g. just after a boost ends): bleed speed off smoothly instead of clamping
@@ -249,18 +296,36 @@ export function stepTank(t, inp, w, dt = DT) {
     else { t.y = ground; t.vy = 0; }
   }
   if (!t.grounded) {
-    t.vy -= C.gravity * dt;
+    // ground slam: after the top of the jump (or straight away when used in the air) it dives hard
+    if (t.slam === 1 && t.vy <= 0) t.slam = 2;
+    t.vy -= C.gravity * (t.slam === 2 ? ULT.slam.fallG : 1) * dt;
     t.y += t.vy * dt;
-    if (t.y <= ground) { t.y = ground; t.vy = 0; t.grounded = true; ev.landed = true; }
-  }
+    if (t.y <= ground) {
+      t.y = ground; t.vy = 0; t.grounded = true; ev.landed = true;
+      if (t.slam) { t.slam = 0; ev.slam = true; }
+    }
+  } else if (t.slam && !ev.jumped) t.slam = 0;
   // safety: never sink below the floor
   if (t.y < (w.floor ?? -10) - 5) { t.y = ground; t.vy = 0; }
 
   // firing
   t.cooldown = Math.max(0, t.cooldown - dt);
-  if (inp.f && t.cooldown <= 0) { t.cooldown = C.fireCooldown; t.shotSeq++; ev.fired = true; }
+  if (inp.f && t.cooldown <= 0) { t.cooldown = C.fireCooldown * (OD ? OD.fireMul : 1); t.shotSeq++; ev.fired = true; ev.fireSeq = t.shotSeq; }
   return ev;
 }
+
+// projectile spawn for the main gun ('shell'), the bounce sidearm and the mega cannon
+export function projectile(t, kind = 'shell') {
+  const m = muzzle(t);
+  if (kind === 'bounce') return { ...m, kind, bounce: SIDE.bounce.bounces, life: C.shellLife + 0.6 };
+  if (kind === 'mega') {
+    const U = ULT.mega, cp = Math.cos(t.aimPitch);
+    const dx = -Math.sin(t.aimYaw) * cp, dy = Math.sin(t.aimPitch), dz = -Math.cos(t.aimYaw) * cp;
+    return { ...m, vx: dx * U.speed, vy: dy * U.speed + 0.5, vz: dz * U.speed, kind, g: U.gravity, hr: U.hitR, life: U.life };
+  }
+  return { ...m, kind: 'shell', life: C.shellLife };
+}
+export const SHELL_KINDS = ['shell', 'bounce', 'mega'];
 
 // ---------------------------------------------------------------- shells
 export function muzzle(t) {
@@ -292,14 +357,33 @@ export function solveAim(t, target) {
 // Step a shell; returns {hitGround:boolean}. Tank hits are checked by caller with segmentHitsTank.
 export function stepShell(s, w, dt = DT) {
   s.px = s.x; s.py = s.y; s.pz = s.z;
-  s.vy -= C.shellGravity * dt;
+  s.vy -= (s.g ?? C.shellGravity) * dt;
   s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
   s.life -= dt;
-  // sample terrain along the segment (shell moves ~2m per tick)
-  for (let k = 1; k <= 4; k++) {
-    const f = k / 4;
+  // sample terrain along the segment (a shell moves 2-5 m per tick)
+  const n = s.kind === 'mega' ? 8 : 4;
+  let lx = s.px, ly = s.py, lz = s.pz;
+  for (let k = 1; k <= n; k++) {
+    const f = k / n;
     const x = s.px + (s.x - s.px) * f, y = s.py + (s.y - s.py) * f, z = s.pz + (s.z - s.pz) * f;
-    if (y <= heightAt(w, x, z)) { s.x = x; s.y = y; s.z = z; return { hitGround: true }; }
+    if (y <= heightAt(w, x, z)) {
+      if (s.bounce > 0) {
+        // ricochet: reflect off the terrain normal (walls are steep, so they reflect sideways)
+        const e = 0.5, h0 = heightAt(w, lx, lz);
+        const nx = -(heightAt(w, x + e, z) - heightAt(w, x - e, z)) / (2 * e), nz = -(heightAt(w, x, z + e) - heightAt(w, x, z - e)) / (2 * e);
+        let gx = nx, gy = 1, gz = nz;
+        if (ly > h0 + 0.05 && Math.abs(nx) + Math.abs(nz) < 0.05) { gx = 0; gy = 1; gz = 0; }
+        const gl = Math.hypot(gx, gy, gz); gx /= gl; gy /= gl; gz /= gl;
+        const vn = s.vx * gx + s.vy * gy + s.vz * gz;
+        const r = SIDE.bounce.restitution;
+        s.vx = (s.vx - 2 * vn * gx) * r; s.vy = (s.vy - 2 * vn * gy) * r; s.vz = (s.vz - 2 * vn * gz) * r;
+        s.x = lx; s.y = Math.max(ly, heightAt(w, lx, lz) + 0.15); s.z = lz;
+        s.bounce--;
+        return { hitGround: false, bounced: true };
+      }
+      s.x = x; s.y = y; s.z = z; return { hitGround: true };
+    }
+    lx = x; ly = y; lz = z;
   }
   return { hitGround: false };
 }
@@ -313,7 +397,7 @@ export function segmentHitsTank(s, t) {
   let u = a > 0 ? -(fx * dx + fy * dy + fz * dz) / a : 0;
   u = clamp(u, 0, 1);
   const qx = fx + dx * u, qy = fy + dy * u, qz = fz + dz * u;
-  const r = C.hitRadius + C.shellRadius;
+  const r = C.hitRadius + C.shellRadius + (s.hr || 0);
   return qx * qx + qy * qy + qz * qz <= r * r;
 }
 
