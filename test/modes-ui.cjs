@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const A = await mk();
   await A.goto(process.env.URL, { waitUntil: 'domcontentloaded' });
   await A.waitForFunction(() => window.__ht && window.__ht.readyAt);
-  await A.click('#lobby-rules button[data-v="team"]');
+  await A.click('#tab-btn-phrase'); await A.click('#lobby-rules button[data-v="team"]');
   await A.selectOption('#lobby-rules select', '5');
   await A.screenshot({ path: 'scratch/shots/modes_lobby.png' });
   await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');

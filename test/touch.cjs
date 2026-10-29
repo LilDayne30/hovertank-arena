@@ -8,7 +8,7 @@ const { chromium, devices } = require('playwright');
   const logs = []; p.on('pageerror', e => logs.push('PAGEERROR ' + e.message));
   await p.goto(URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
   await p.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'), null, { timeout: 60000 });
-  await p.tap('#btn-create'); await p.waitForTimeout(2000); await p.tap('#btn-invite-close');
+  await p.tap('#tab-btn-phrase'); await p.tap('#btn-create'); await p.waitForTimeout(2000); await p.tap('#btn-invite-close');
   const cdp = await ctx.newCDPSession(p);
   const T = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
   const st = () => p.evaluate(() => { const i = window.__ht; const t = i.local.t; return { pos: t && [+t.x.toFixed(1), +t.z.toFixed(1)], v: t && +Math.hypot(t.vx, t.vz).toFixed(1), shot: t && t.shotSeq, scrollY: window.scrollY, quality: devicePixelRatio }; });

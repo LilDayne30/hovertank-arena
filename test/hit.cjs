@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   const mk = async () => { const c = await b.newContext({ viewport: { width: 640, height: 360 } }); const p = await c.newPage(); return p; };
   const A = await mk();
   await A.goto(URL + '/?debug', { waitUntil: 'domcontentloaded' }); await A.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'));
-  await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');
+  await A.click('#tab-btn-phrase'); await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');
   const inv = await A.inputValue('#invite-url');
   const B = await mk(); await B.goto(inv + '&debug', { waitUntil: 'domcontentloaded' }); await B.waitForFunction(() => document.getElementById('loading').classList.contains('hidden')); await B.click('#btn-join');
   await A.waitForTimeout(2500);

@@ -19,20 +19,20 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   await A.goto(URL + '/?debug', { waitUntil: 'domcontentloaded' }); await ready(A);
 
   // ---- lobby picker
-  await A.click('#lobby-loadout [data-k="side"][data-v="shield"]');
-  await A.click('#lobby-loadout [data-k="ult"][data-v="strike"]');
+  await A.click('#btn-loadout');
+  await A.click('#loadout-picker [data-k="side"][data-v="shield"]');
+  await A.click('#loadout-picker [data-k="ult"][data-v="strike"]');
   const lo = await A.evaluate(() => JSON.parse(localStorage.getItem('ht-loadout')));
   ok(lo.side === 'shield' && lo.ult === 'strike', `loadout saved: ${JSON.stringify(lo)}`);
-  ok(await A.evaluate(() => document.querySelector('#settings-loadout [data-v="shield"]').getAttribute('aria-pressed') === 'true'), 'settings picker follows the lobby picker');
-  await A.evaluate(() => document.getElementById('lobby-loadout').scrollIntoView());
+  ok(await A.evaluate(() => document.querySelector('#btn-loadout').textContent.includes('リフレクトシールド') && document.querySelector('#btn-loadout2').textContent.includes('エアストライク')), 'lobby and settings summaries follow the picker');
   await A.screenshot({ path: 'scratch/shots/ab-lobby.png' });
   // back to dash + mega for the fight
-  await A.click('#lobby-loadout [data-k="side"][data-v="dash"]'); await A.click('#lobby-loadout [data-k="ult"][data-v="mega"]');
+  await A.click('#loadout-picker [data-k="side"][data-v="dash"]'); await A.click('#loadout-picker [data-k="ult"][data-v="mega"]'); await A.click('#btn-lo-close');
 
-  await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');
+  await A.click('#tab-btn-phrase'); await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');
   const inv = await A.inputValue('#invite-url');
   const B = await mk(); await B.goto(inv + '&debug', { waitUntil: 'domcontentloaded' }); await ready(B);
-  await B.click('#lobby-loadout [data-k="side"][data-v="shield"]');
+  await B.click('#btn-loadout'); await B.click('#loadout-picker [data-k="side"][data-v="shield"]'); await B.click('#btn-lo-close');
   await B.click('#btn-join');
   await A.waitForTimeout(2500);
   const roster = await A.evaluate(() => new Promise((r) => setTimeout(() => r(document.getElementById('board').innerText), 300)));
@@ -84,6 +84,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
     h0 = await hpB();
   }
   const h1 = await hpB();
+  if (h1 > h0 - 40) console.log('      B state:', JSON.stringify(await B.evaluate(() => ({ inv: window.__ht.local.invuln, left: window.__ht.local.invulnLeft, sh: window.__ht.local.t?.shieldT, alive: window.__ht.local.alive }))), 'A events:', JSON.stringify(await A.evaluate(() => (window.__ev || []).slice(-12))));
   ok(h1 <= h0 - 40 || !(await B.evaluate(() => window.__ht.local.alive)), `mega cannon hit B: ${h0} -> ${h1} HP`);
   await B.screenshot({ path: 'scratch/shots/ab-mega-victim.png' });
 
@@ -97,9 +98,9 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   ok(sh > 1, `B raised the shield (${sh.toFixed(2)} s left)`);
 
   // ---- switch A to mine + strike in the room (settings picker -> 'loadout' message)
-  await A.evaluate(() => document.getElementById('btn-settings').click());
-  await A.click('#settings-loadout [data-k="side"][data-v="mine"]'); await A.click('#settings-loadout [data-k="ult"][data-v="strike"]');
-  await A.screenshot({ path: 'scratch/shots/ab-settings.png' });
+  await A.evaluate(() => document.getElementById('btn-settings').click()); await A.click('#btn-loadout2');
+  await A.click('#loadout-picker [data-k="side"][data-v="mine"]'); await A.click('#loadout-picker [data-k="ult"][data-v="strike"]');
+  await A.screenshot({ path: 'scratch/shots/ab-settings.png' }); await A.click('#btn-lo-close');
   await A.click('#btn-settings-close');
   await aimAt(B);
   await B.waitForFunction(() => [...document.querySelectorAll('.tag .lo')].some((e) => e.textContent === '✱✈'), null, { timeout: 5000 }).catch(() => {});
@@ -120,8 +121,8 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   console.log('      B after the strike:', h0, '->', await hpB());
 
   // ---- slam
-  await A.evaluate(() => document.getElementById('btn-settings').click());
-  await A.click('#settings-loadout [data-k="ult"][data-v="slam"]'); await A.click('#btn-settings-close');
+  await A.evaluate(() => document.getElementById('btn-settings').click()); await A.click('#btn-loadout2');
+  await A.click('#loadout-picker [data-k="ult"][data-v="slam"]'); await A.click('#btn-lo-close'); await A.click('#btn-settings-close');
   await A.waitForFunction(() => window.__ht.local.t?.ult >= 100, null, { timeout: 15000 });
   await A.keyboard.press('KeyQ');
   await A.waitForFunction(() => window.__ht.local.t.slam > 0, null, { timeout: 5000 }).catch(() => {});
@@ -131,8 +132,8 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   ok(up >= 1, `slam jumps (slam state ${up})`);
 
   // ---- overdrive aura
-  await A.evaluate(() => document.getElementById('btn-settings').click());
-  await A.click('#settings-loadout [data-k="ult"][data-v="overdrive"]'); await A.click('#settings-loadout [data-k="side"][data-v="bounce"]'); await A.click('#btn-settings-close');
+  await A.evaluate(() => document.getElementById('btn-settings').click()); await A.click('#btn-loadout2');
+  await A.click('#loadout-picker [data-k="ult"][data-v="overdrive"]'); await A.click('#loadout-picker [data-k="side"][data-v="bounce"]'); await A.click('#btn-lo-close'); await A.click('#btn-settings-close');
   await A.waitForFunction(() => window.__ht.local.t?.ult >= 100, null, { timeout: 15000 });
   const pre = await A.evaluate(() => { const h = window.__ht, me = h.snaps.at(-1).players.get(h.room?.sessionId) || null; return { lu: h.local.t.ult, ul: h.local.t.ultK, alive: h.local.alive, slam: h.local.t.slam }; });
   await A.keyboard.press('KeyQ');

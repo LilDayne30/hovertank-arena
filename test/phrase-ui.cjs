@@ -22,7 +22,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   await A.click('#qm-goal [data-g="time"]');
 
   const word = `ねこじゃらし${Math.floor(Math.random() * 90 + 10)}`;
-  await A.fill('#name', 'Alice'); await A.fill('#phrase', word);
+  await A.click('#tab-btn-phrase'); await A.fill('#name', 'Alice'); await A.fill('#phrase', word);
   await A.click('#lobby-rules [data-k="bots"][data-v="1"]');
   await A.evaluate(() => document.getElementById('phrase').scrollIntoView({ block: 'center' }));
   await A.screenshot({ path: 'scratch/shots/ph-lobby.png' });
@@ -34,7 +34,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   await A.click('#btn-invite-close');
 
   const B = await mk({ width: 844, height: 390 });
-  await B.fill('#name', 'Bob'); await B.fill('#phrase', word.replace('ねこ', 'ネコ'));   // katakana still matches
+  await B.click('#tab-btn-phrase'); await B.fill('#name', 'Bob'); await B.fill('#phrase', word.replace('ねこ', 'ネコ'));   // katakana still matches
   await B.click('#btn-create');
   await B.waitForFunction(() => window.__ht.room && document.getElementById('lobby').classList.contains('hidden'), null, { timeout: 8000 });
   await B.waitForTimeout(1500);

@@ -74,7 +74,15 @@ async function init() {
   document.body.classList.toggle('touch', matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window);
   $('name').value = store.get('ht-name') || '';
   const rid = params.get('r');
-  if (rid) { $('btn-join').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
+  if (rid) { $('join-box').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
+  // lobby tabs: quick match / passphrase room (remembered)
+  const showTab = (t) => {
+    document.querySelectorAll('.lb-tabs [data-tab]').forEach((b) => { const on = b.dataset.tab === t; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+    $('tab-quick').classList.toggle('hidden', t !== 'quick'); $('tab-phrase').classList.toggle('hidden', t !== 'phrase');
+    store.set('ht-lobby-tab', t);
+  };
+  document.querySelectorAll('.lb-tabs [data-tab]').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+  showTab(store.get('ht-lobby-tab') === 'phrase' ? 'phrase' : 'quick');
   // rules for a new room (remembered); when opened from an invite, show the room's rules instead
   const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
   // private match: passphrase (empty -> one is made up)
@@ -112,7 +120,9 @@ async function init() {
   $('btn-quick').onclick = () => start('quick', null, null, qmMode, qmMode === 'team' ? 4 : qmSize, qmGoal, qmTarget);
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
-  loadoutPicker($('lobby-loadout')); loadoutPicker($('settings-loadout'));
+  loadoutPicker($('loadout-picker'));
+  for (const id of ['btn-loadout', 'btn-loadout2']) $(id).onclick = () => { document.exitPointerLock?.(); $('loadout').classList.remove('hidden'); };
+  $('btn-lo-close').onclick = () => $('loadout').classList.add('hidden');
   wireUi();
   setupSound();
   profile = new Profile(ENDPOINT);
@@ -401,7 +411,7 @@ function bindRoom(r) {
     input.enabled = false;
     $('center-msg').textContent = '';
     $('lobby').classList.remove('hidden');
-    $('btn-join').classList.remove('hidden');
+    $('join-box').classList.remove('hidden'); $('lobby-room-rules').textContent = '';
     $('btn-join').textContent = 'もう一度参加';
     $('btn-join').onclick = () => location.reload();
     $('lobby-status').textContent = `サーバーとの接続が切れました（${RECONNECT_SECONDS}秒以内の再接続に失敗）。`;
@@ -432,6 +442,7 @@ function onSnapshot(m) {
   if (serverTick === null || Math.abs(serverTick - s.k) > 15) serverTick = s.k;
   else serverTick += (s.k - serverTick) * 0.08;
   for (const e of m.e) {
+    if (DEBUG && !["boost"].includes(e.t)) (window.__ev ??= []).push(`${e.t}:${e.k || ""}:${e.v || ""}:${e.d || ""}`);
     if (e.t === 'hit' && e.o === myId) { flashHitmark(); sound.hitConfirm(); }
     if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); sound.hurt(); }
     if (e.t === 'team' && e.v !== myId) notice(`${escapeHtml(nameOf(e.v))} が${TEAM_NAMES[e.team]}に移動`);
@@ -1213,7 +1224,7 @@ function rulesPicker(el, initial, onChange) {
     <div class="row cpu-lv"><span class="lbl">CPUの強さ</span><button data-k="botLevel" data-v="easy" type="button">よわい</button><button data-k="botLevel" data-v="normal" type="button">ふつう</button><button data-k="botLevel" data-v="hard" type="button">つよい</button></div>`;
   const paint = () => {
     el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(String(cur[b.dataset.k]) === b.dataset.v)));
-    el.querySelector('.cpu-lv').classList.toggle('dim', !cur.bots);
+    el.querySelector('.cpu-lv').classList.toggle('hidden', !cur.bots);   // strength only matters with CPUs
     const sel = el.querySelector('select'); sel.value = String(cur.target); sel.classList.toggle('dim', cur.goal !== 'kills');
   };
   el.querySelectorAll('button').forEach((b) => { b.onclick = () => { cur = cleanRules({ ...cur, [b.dataset.k]: b.dataset.v }); paint(); onChange(cur); }; });
@@ -1309,7 +1320,7 @@ function updateAbilityHud(t) {
 
 // sidearm / special chooser (the lobby and the settings panel share one state)
 function loadoutPicker(el) {
-  const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b>${a.name}</button>`;
+  const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b><span>${a.name}</span><small>${k === 'side' ? `${a.cd}秒` : ''}</small></button>`;
   el.innerHTML = `<div class="lo-h">サイドアーム <small>（${document.body.classList.contains('touch') ? 'SUBボタン' : 'Eキー'}・クールダウン制）</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p>
     <div class="lo-h">必殺技 <small>（${document.body.classList.contains('touch') ? 'SPボタン' : 'Qキー'}・ゲージ満タンで使える）</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p>`;
   const paint = () => {
@@ -1318,6 +1329,14 @@ function loadoutPicker(el) {
     el.querySelector('[data-d="side"]').innerHTML = `${escapeHtml(S.desc)}（クールダウン${S.cd}秒）<em>コツ：${escapeHtml(S.tip)}</em>`;
     el.querySelector('[data-d="ult"]').innerHTML = `${escapeHtml(U.desc)}<em>コツ：${escapeHtml(U.tip)}</em>`;
   };
+  // compact summaries (lobby / settings buttons that open this picker)
+  const paintSummary = () => {
+    const touch = document.body.classList.contains('touch'), S = SIDE[loadout.side], U = ULT[loadout.ult];
+    const html = `<span class="lo-i"><b>${S.icon}</b><span class="lo-n">${S.name}</span><kbd>${touch ? 'SUB' : 'E'}</kbd></span><span class="lo-i"><b>${U.icon}</b><span class="lo-n">${U.name}</span><kbd>${touch ? 'SP' : 'Q'}</kbd></span><span class="lo-edit">変更</span>`;
+    document.querySelectorAll('.lo-sum').forEach((e) => { e.innerHTML = html; });
+  };
+  loadoutPickers.push(paintSummary);
+  paintSummary();
   el.querySelectorAll('button').forEach((b) => { b.onclick = () => {
     loadout = cleanLoadout({ ...loadout, [b.dataset.k]: b.dataset.v });
     store.set('ht-loadout', JSON.stringify(loadout));

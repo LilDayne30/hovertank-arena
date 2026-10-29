@@ -56,40 +56,70 @@
 
   <!-- panels -->
   <div id="lobby" class="panel scrollable">
-    <button type="button" class="btn-mute lobby-mute" aria-label="サウンドのオン・オフ">🔊</button>
-    <h1>HOVER TANK <span>ARENA</span></h1>
-    <p class="sub">滑って、撃って、跳べ。最大4人のオンライン対戦</p>
-    <div id="prof-bar" class="hidden">
-      <div class="pb-top"><span id="pb-lv">Lv.1</span><span id="pb-title"></span><span id="pb-xp"></span></div>
-      <div class="xpbar"><i id="pb-fill"></i></div>
-      <div class="pb-btns"><button id="btn-garage" type="button">ガレージ</button><button id="btn-missions" type="button">ミッション<span id="pb-badge"></span></button><button id="btn-transfer" type="button">引き継ぎ</button></div>
+    <header class="lb-head">
+      <h1>HOVER TANK <span>ARENA</span></h1>
+      <p class="sub">滑って、撃って、跳べ。最大4人のオンライン対戦</p>
+      <button type="button" class="btn-mute lobby-mute" aria-label="サウンドのオン・オフ">🔊</button>
+    </header>
+    <div class="lb-grid">
+      <!-- you: name, level, outfit, loadout -->
+      <section class="lb-me" aria-label="プレイヤー">
+        <label class="field"><span class="field-l">名前</span><input id="name" maxlength="12" autocomplete="off" placeholder="Player" /></label>
+        <div id="prof-bar" class="hidden">
+          <div class="pb-top"><span id="pb-lv">Lv.1</span><span id="pb-title"></span><span id="pb-xp"></span></div>
+          <div class="xpbar"><i id="pb-fill"></i></div>
+          <div class="pb-btns"><button id="btn-garage" type="button">ガレージ</button><button id="btn-missions" type="button">ミッション<span id="pb-badge"></span></button><button id="btn-transfer" type="button">引き継ぎ</button></div>
+        </div>
+        <div class="lb-lo">
+          <div class="field-l">装備</div>
+          <button id="btn-loadout" type="button" class="lo-sum" aria-label="装備を変える"></button>
+        </div>
+      </section>
+
+      <!-- play: quick match or passphrase room -->
+      <section class="lb-play" aria-label="対戦">
+        <div id="join-box" class="hidden">
+          <p id="lobby-room-rules"></p>
+          <button id="btn-join" type="button" class="big">この部屋に参加</button>
+        </div>
+        <div class="lb-tabs" role="tablist">
+          <button type="button" role="tab" data-tab="quick" id="tab-btn-quick">クイックマッチ</button>
+          <button type="button" role="tab" data-tab="phrase" id="tab-btn-phrase">合言葉で遊ぶ</button>
+        </div>
+        <div id="tab-quick" class="lb-pane" role="tabpanel" aria-labelledby="tab-btn-quick">
+          <p class="lb-desc">同じ条件を選んだ人どうしで、すぐに対戦できます。</p>
+          <div id="qm-mode" class="rules">
+            <div class="row"><span class="lbl">モード</span><button data-v="any" type="button">どちらでも</button><button data-v="ffa" type="button">個人戦</button><button data-v="team" type="button">チーム戦</button></div>
+            <div class="row" id="qm-size"><span class="lbl">人数</span><button data-n="2" type="button">2人</button><button data-n="3" type="button">3人</button><button data-n="4" type="button">4人</button></div>
+            <div class="row" id="qm-goal"><span class="lbl">勝利条件</span><button data-g="time" type="button">5分間で多く倒す</button><button data-g="kills" type="button">先に</button><select aria-label="キル数"></select><span class="lbl2">キル</span></div>
+          </div>
+          <button id="btn-quick" type="button" class="big go">マッチング開始</button>
+        </div>
+        <div id="tab-phrase" class="lb-pane hidden" role="tabpanel" aria-labelledby="tab-btn-phrase">
+          <p class="lb-desc">友達と同じ合言葉を入れると、同じ部屋に入れます。</p>
+          <div class="phrase-row"><input id="phrase" maxlength="16" autocomplete="off" placeholder="合言葉（例：たこやき）" aria-label="合言葉" /><button id="btn-phrase-rand" type="button" aria-label="合言葉をおまかせで決める" title="おまかせ">🎲</button></div>
+          <div id="lobby-rules" class="rules"></div>
+          <p class="note">ルールは最初に入った人のものになります。よくある言葉だと、知らない人と同じ部屋になることがあります。</p>
+          <button id="btn-create" type="button" class="big go">合言葉で入る</button>
+        </div>
+        <p id="offline" class="hidden">オフラインです。対戦にはインターネット接続が必要です。</p>
+        <p id="lobby-status" role="status"></p>
+      </section>
     </div>
-    <label>名前 <input id="name" maxlength="12" autocomplete="off" placeholder="Player" /></label>
-    <div class="lobby-sec"><div class="sec-h">装備（いつでも変えられます）</div><div id="lobby-loadout" class="loadout"></div></div>
-    <div class="lobby-sec">
-      <button id="btn-quick" type="button" class="big">クイックマッチ</button>
-      <div id="qm-mode" class="rules"><div class="row"><span class="lbl">モード</span><button data-v="any" type="button">どちらでも</button><button data-v="ffa" type="button">個人戦</button><button data-v="team" type="button">チーム戦</button></div>
-        <div class="row" id="qm-size"><span class="lbl">人数</span><button data-n="2" type="button">2人（1対1）</button><button data-n="3" type="button">3人</button><button data-n="4" type="button">4人</button></div>
-        <div class="row" id="qm-goal"><span class="lbl">勝利条件</span><button data-g="time" type="button">5分間で多く倒す</button><button data-g="kills" type="button">先に</button><select aria-label="キル数"></select><span class="lbl2">キル</span></div></div>
-    </div>
-    <div class="lobby-sec">
-      <div class="sec-h">プライベートマッチ（同じ合言葉を入れた人どうしで遊ぶ・CPUの数と強さも選べる）</div>
-    <div class="row phrase-row"><input id="phrase" maxlength="16" autocomplete="off" placeholder="合言葉（例：たこやき）" aria-label="合言葉" /><button id="btn-phrase-rand" type="button" aria-label="合言葉をおまかせで決める" title="おまかせ">🎲</button></div>
-    <div id="lobby-rules" class="rules"></div>
-    <p class="note">誰もいない合言葉なら、このルールで新しい部屋ができます。友達はロビーで同じ合言葉を入れるだけで参加できます（ルールは先に入った人のもの）。ほかの人と同じ言葉だと知らない人が入ることがあるので、ちょっと変わった言葉がおすすめ。</p>
-    <p id="lobby-room-rules"></p>
-    <div id="lobby-actions">
-      <button id="btn-create" type="button">合言葉で入る</button>
-      <button id="btn-join" type="button" class="hidden">この部屋に参加</button>
-    </div>
-    </div>
-    <p id="offline" class="hidden">オフラインです。対戦にはインターネット接続が必要です。</p>
-    <p id="lobby-status"></p>
-    <div id="install" class="hidden">
-      <button id="btn-install" type="button">ホーム画面に追加</button>
-      <p id="install-help" class="hidden"></p>
-    </div>
-    <a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット・ライセンス</a>
+    <footer class="lb-foot">
+      <div id="install" class="hidden">
+        <button id="btn-install" type="button">ホーム画面に追加</button>
+        <p id="install-help" class="hidden"></p>
+      </div>
+      <a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット・ライセンス</a>
+    </footer>
+  </div>
+
+  <!-- sidearm / special chooser (from the lobby and from settings) -->
+  <div id="loadout" class="panel wide scrollable hidden">
+    <h2>装備</h2>
+    <div id="loadout-picker" class="loadout"></div>
+    <div class="row"><button id="btn-lo-close" type="button">決定</button></div>
   </div>
 
   <div id="garage" class="panel side scrollable hidden">
@@ -133,7 +163,7 @@
     <label class="row">BGM <input id="vol-bgm" type="range" min="0" max="1" step="0.05" value="0.55" /></label>
     <label class="row">効果音 <input id="vol-sfx" type="range" min="0" max="1" step="0.05" value="0.9" /></label>
     <div class="sec-h">装備</div>
-    <div id="settings-loadout" class="loadout"></div>
+    <button id="btn-loadout2" type="button" class="lo-sum" aria-label="装備を変える"></button>
     <div id="settings-rules" class="rules"></div>
     <p id="public-note" class="note hidden">クイックマッチの部屋はルール固定です（同じモード・人数・勝利条件を選んだ人どうしで集めるため）。ルールはロビーで選べます。</p>
     <div class="row"><button id="btn-newgame" type="button">このルールでニューゲーム</button><button id="btn-team" type="button" class="hidden">チームを変える</button></div>

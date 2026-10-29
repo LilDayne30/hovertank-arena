@@ -27,7 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   });
 
   const A = await open('Alice', URL);
-  await A.p.click('#btn-create');
+  await A.p.click('#tab-btn-phrase'); await A.p.click('#btn-create');
   await A.p.waitForFunction(() => /[?&]r=/.test(location.search), null, { timeout: 60000 });
   const invite = await A.p.inputValue('#invite-url');
   await A.p.click('#btn-invite-close');
