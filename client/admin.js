@@ -162,3 +162,22 @@ function barChart(host, labels, values, { color, unit = '', digits = 0, xTitle, 
 }
 
 load();
+
+// ---- admin account: unlock every item for the game profile stored in this browser (same site, same storage)
+const pid = () => { try { return localStorage.getItem('ht-pid'); } catch { return null; } };
+async function paintAcct(view) {
+  const st = $('acct-state');
+  if (!pid()) { st.textContent = 'このブラウザではまだゲームを開いていません。先にゲームを一度開いてから、ここに戻ってください。'; $('acct-on').disabled = $('acct-off').disabled = true; return; }
+  if (!view) view = await fetch('/api/profile', { headers: { authorization: `Bearer ${pid()}` }, cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!view) { st.textContent = 'ゲームのデータを読み込めませんでした。'; return; }
+  st.textContent = `このブラウザのデータ：Lv.${view.level}・解放済み ${view.owned.length} 個・${view.admin ? '管理者（全解放）' : '通常'}`;
+  $('acct-on').disabled = !!view.admin; $('acct-off').disabled = !view.admin;
+}
+async function grant(on) {
+  const r = await fetch('/api/admin/grant', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${store.get()}` }, body: JSON.stringify({ token: pid(), on }) }).catch(() => null);
+  if (!r || !r.ok) { $('acct-state').textContent = `変更できませんでした（${r ? r.status : '通信エラー'}）`; return; }
+  paintAcct(await r.json());
+}
+$('acct-on').onclick = () => grant(true);
+$('acct-off').onclick = () => grant(false);
+paintAcct();

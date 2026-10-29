@@ -48,6 +48,7 @@ export default {
     if (url.pathname === '/api/stats') return matchmaker(env).fetch('https://mm/stats');
     if (url.pathname.startsWith('/api/profile')) return profileApi(request, env, url.pathname.slice('/api/profile'.length), ctx);
     if (url.pathname === '/api/admin/summary') return adminSummary(request, env, url);
+    if (url.pathname === '/api/admin/grant' && request.method === 'POST') return adminGrant(request, env);
 
     const m = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/ws)?$/);
     if (m) {
@@ -105,11 +106,22 @@ async function profileApi(request, env, path, ctx) {
 
 // ------------------------------------------------------------------ owner's dashboard data
 // Authorization: Bearer <admin key>. Only the SHA-256 of the key is in the config (ADMIN_KEY_HASH).
-async function adminSummary(request, env, url) {
+async function isAdmin(request, env) {
   const key = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!env.ADMIN_KEY_HASH || !key) return json({ error: 'unauthorized' }, 401);
+  if (!env.ADMIN_KEY_HASH || !key) return false;
   const h = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  if (h !== env.ADMIN_KEY_HASH) return json({ error: 'unauthorized' }, 401);
+  return h === env.ADMIN_KEY_HASH;
+}
+// make a player profile an admin profile (every item unlocked) or back: { token, on }
+async function adminGrant(request, env) {
+  if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
+  const body = await request.json().catch(() => ({}));
+  if (!TOKEN_RE.test(body.token || '')) return json({ error: 'bad token' }, 400);
+  const stub = profileStub(env, await profileKey(body.token));
+  return stub.fetch('https://profile/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: body.on !== false }) });
+}
+async function adminSummary(request, env, url) {
+  if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
   const days = url.searchParams.get('days') || '30';
   return statsStub(env).fetch(`https://stats/summary?days=${encodeURIComponent(days)}`);
 }

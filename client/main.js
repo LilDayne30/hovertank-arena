@@ -151,6 +151,7 @@ async function init() {
     fx.killStyle(x, gy + C.hoverHeight, z, mats.slotLit[1], style, { groundY: gy, big: true });
     hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; centerFlash('撃破！', 1200, true);
   };
+  if (DEBUG) window.__ht.spin = (yaw) => { preview.held = yaw != null; if (yaw != null) { preview.yaw = yaw; preview.spin = 0; } };   // debug: hold the showcase tank at an angle (screenshots)
   if (DEBUG) window.__ht.preview = (look) => { preview.look = look ? { ...DEFAULT_LOOK, ...look } : null; if (preview.v) removeTank('__preview'); $('lobby').classList.toggle('hidden', !!look); };
   const pwa = setupPwa({
     onOffline: (off) => {
