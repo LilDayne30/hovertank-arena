@@ -15,11 +15,12 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   };
   const A = await mk();
   // quick match: win condition picker is remembered
-  await A.click('#qm-goal [data-g="kills"]'); await A.selectOption('#qm-goal select', '15');
+  await A.click('#btn-qm-opts'); await A.click('#qm-goal [data-g="kills"]'); await A.selectOption('#qm-goal select', '15');
   ok(await A.evaluate(() => localStorage.getItem('ht-qm-goal') === 'kills' && localStorage.getItem('ht-qm-target') === '15'), 'quick-match win condition saved (first to 15 kills)');
   await A.evaluate(() => document.getElementById('qm-goal').scrollIntoView({ block: 'center' }));
   await A.screenshot({ path: 'scratch/shots/ph-qm.png' });
-  await A.click('#qm-goal [data-g="time"]');
+  ok((await A.textContent('#qm-sum-text')).includes('15キル先取'), `summary chip shows it: ${await A.textContent('#qm-sum-text')}`);
+  await A.click('#qm-goal [data-g="time"]'); await A.click('#btn-qm-close');
 
   const word = `ねこじゃらし${Math.floor(Math.random() * 90 + 10)}`;
   await A.click('#tab-btn-phrase'); await A.fill('#name', 'Alice'); await A.fill('#phrase', word);

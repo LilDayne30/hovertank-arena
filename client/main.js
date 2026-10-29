@@ -75,14 +75,13 @@ async function init() {
   $('name').value = store.get('ht-name') || '';
   const rid = params.get('r');
   if (rid) { $('join-box').classList.remove('hidden'); $('btn-join').textContent = `部屋 ${rid} に参加`; }
-  // lobby tabs: quick match / passphrase room (remembered)
-  const showTab = (t) => {
-    document.querySelectorAll('.lb-tabs [data-tab]').forEach((b) => { const on = b.dataset.tab === t; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
-    $('tab-quick').classList.toggle('hidden', t !== 'quick'); $('tab-phrase').classList.toggle('hidden', t !== 'phrase');
-    store.set('ht-lobby-tab', t);
-  };
-  document.querySelectorAll('.lb-tabs [data-tab]').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
-  showTab(store.get('ht-lobby-tab') === 'phrase' ? 'phrase' : 'quick');
+  // lobby sheets (quick-match conditions, passphrase room, loadout): one open at a time, tap outside to close
+  $('btn-qm-opts').onclick = () => openSheet('qm-sheet');
+  $('tab-btn-phrase').onclick = () => { openSheet('phrase-sheet'); if (!input?.touchMode) setTimeout(() => $('phrase').focus(), 50); };
+  $('sheet-backdrop').onclick = closeSheets;
+  for (const id of ['btn-qm-close', 'btn-phrase-close', 'btn-lo-close']) $(id).onclick = closeSheets;
+  document.querySelectorAll('.sheet .x-close').forEach((b) => { b.onclick = closeSheets; });
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheets(); });
   // rules for a new room (remembered); when opened from an invite, show the room's rules instead
   const lobbyRules = rulesPicker($('lobby-rules'), cleanRules(JSON.parse(store.get('ht-rules') || 'null')), (r) => store.set('ht-rules', JSON.stringify(r)));
   // private match: passphrase (empty -> one is made up)
@@ -98,21 +97,28 @@ async function init() {
   // quick match (public rooms) with a mode preference
   // quick match: mode + how many tanks fight (team battle is always 2 v 2)
   let qmMode = store.get('ht-qm') || 'any', qmSize = Number(store.get('ht-qm-size')) || 4;
+  let qmGoal = store.get('ht-qm-goal') === 'kills' ? 'kills' : 'time', qmTarget = KILL_TARGETS.includes(Number(store.get('ht-qm-target'))) ? Number(store.get('ht-qm-target')) : 10;
   const paintQm = () => {
     document.querySelectorAll('#qm-mode [data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === qmMode)));
     const size = qmMode === 'team' ? 4 : qmSize;
     document.querySelectorAll('#qm-size button').forEach((b) => { b.setAttribute('aria-pressed', String(Number(b.dataset.n) === size)); b.disabled = qmMode === 'team' && b.dataset.n !== '4'; });
+    paintQmSum();
+  };
+  // the chip above the play button says what you will get
+  const paintQmSum = () => {
+    const size = qmMode === 'team' ? 4 : qmSize, mode = qmMode === 'team' ? 'チーム戦（2対2）' : `${qmMode === 'ffa' ? '個人戦' : 'どちらでも'}・${size}人`;
+    $('qm-sum-text').textContent = `${mode}・${qmGoal === 'kills' ? `${qmTarget}キル先取` : '5分間'}`;
   };
   document.querySelectorAll('#qm-mode [data-v]').forEach((b) => { b.onclick = () => { qmMode = b.dataset.v; store.set('ht-qm', qmMode); paintQm(); }; });
   document.querySelectorAll('#qm-size button').forEach((b) => { b.onclick = () => { qmSize = Number(b.dataset.n); store.set('ht-qm-size', String(qmSize)); if (qmMode === 'team' && qmSize !== 4) qmMode = 'ffa'; paintQm(); }; });
   // win condition (people are matched with others who picked the same)
-  let qmGoal = store.get('ht-qm-goal') === 'kills' ? 'kills' : 'time', qmTarget = KILL_TARGETS.includes(Number(store.get('ht-qm-target'))) ? Number(store.get('ht-qm-target')) : 10;
   const goalSel = document.querySelector('#qm-goal select');
   goalSel.innerHTML = KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('');
   const paintGoal = () => {
     document.querySelectorAll('#qm-goal [data-g]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.g === qmGoal)));
     goalSel.value = String(qmTarget); goalSel.classList.toggle('dim', qmGoal !== 'kills');
     store.set('ht-qm-goal', qmGoal); store.set('ht-qm-target', String(qmTarget));
+    paintQmSum();
   };
   document.querySelectorAll('#qm-goal [data-g]').forEach((b) => { b.onclick = () => { qmGoal = b.dataset.g; paintGoal(); }; });
   goalSel.onchange = () => { qmTarget = Number(goalSel.value); qmGoal = 'kills'; paintGoal(); };
@@ -121,8 +127,11 @@ async function init() {
   if (rid) roomInfo(ENDPOINT, rid).then((i) => { if (i.exists && i.rules) $('lobby-room-rules').textContent = i.public ? `この部屋：クイックマッチ・${qmLabel(i.rules)}` : `この部屋のルール：${rulesLabel(i.rules)}（${i.players}/4人）`; }).catch(() => {});
   $('btn-join').onclick = () => start('join', rid);
   loadoutPicker($('loadout-picker'));
-  for (const id of ['btn-loadout', 'btn-loadout2']) $(id).onclick = () => { document.exitPointerLock?.(); $('loadout').classList.remove('hidden'); };
-  $('btn-lo-close').onclick = () => $('loadout').classList.add('hidden');
+  // tap an ability icon to change just that one; from settings both are shown
+  $('btn-loadout').onclick = () => openLoadout('side');
+  $('btn-lo-ult').onclick = () => openLoadout('ult');
+  $('btn-loadout2').onclick = () => { document.exitPointerLock?.(); openLoadout(null); };
+  setupLobbyDrag();
   wireUi();
   setupSound();
   profile = new Profile(ENDPOINT);
@@ -315,6 +324,37 @@ function showInvite() {
 }
 const PHRASE_WORDS = ['たこ', 'いか', 'ねこ', 'うに', 'くま', 'そら', 'ほし', 'もち', 'かぜ', 'ゆき', 'つき', 'はな', 'さめ', 'きつね', 'たぬき', 'かに'];
 function randomPhrase() { return `${PHRASE_WORDS[Math.floor(Math.random() * PHRASE_WORDS.length)]}${10 + Math.floor(Math.random() * 90)}`; }
+// ------------------------------------------------------------------ lobby sheets & showcase
+function openSheet(id) {
+  closeSheets();
+  $(id).classList.remove('hidden');
+  $('sheet-backdrop').classList.remove('hidden');
+}
+function closeSheets() {
+  for (const id of ['qm-sheet', 'phrase-sheet', 'loadout']) $(id).classList.add('hidden');
+  $('sheet-backdrop').classList.add('hidden');
+}
+// slot: 'side' | 'ult' (lobby icon) or null (both, from settings)
+function openLoadout(slot) {
+  const el = $('loadout');
+  if (slot) el.dataset.only = slot; else delete el.dataset.only;
+  $('lo-title').textContent = slot === 'side' ? 'サイドアームを選ぶ' : slot === 'ult' ? '必殺技を選ぶ' : '装備';
+  openSheet('loadout');
+}
+// drag the lobby tank to spin it (mouse or finger); it keeps turning slowly on its own
+function setupLobbyDrag() {
+  const cv = $('game');
+  let drag = null;
+  cv.addEventListener('pointerdown', (e) => { if (room) return; drag = { x: e.clientX, id: e.pointerId }; preview.held = true; });
+  window.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x; drag.x = e.clientX;
+    preview.yaw += dx * 0.012; preview.spin = dx * 0.7;
+  });
+  const end = (e) => { if (drag && e.pointerId === drag.id) { drag = null; preview.held = false; } };
+  window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+}
+
 function showLoading(on, text) { $('loading').classList.toggle('hidden', !on); if (text) $('loading-text').textContent = text; }
 function banner(text) { $('banner').textContent = text || ''; $('banner').classList.toggle('hidden', !text); }
 
@@ -367,6 +407,7 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', q
   history.replaceState(null, '', `${location.pathname}?r=${room.roomId}${DEBUG ? '&debug' : ''}`);
   store.sset(`ht-token-${room.roomId}`, room.reconnectionToken);
   showLoading(false);
+  closeSheets();
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden');
   document.body.classList.add('playing');
@@ -513,7 +554,8 @@ function update(dt) {
   dt = Math.min(dt, 0.1);
   fpsSmooth = fpsSmooth * 0.95 + (1 / Math.max(dt, 1e-4)) * 0.05;
   if (!room || !myId) {
-    if (preview.look && looks) garagePreview(dt); else { if (tanks.has('__preview')) removeTank('__preview'); lobbyCamera(dt); }
+    const showcase = looks && !preview.look && !$('lobby').classList.contains('hidden');
+    if (looks && (preview.look || showcase)) garagePreview(dt, showcase); else { if (tanks.has('__preview')) removeTank('__preview'); lobbyCamera(dt); }
     sound.engine({ alive: false });
     fx.update(dt); return;
   }
@@ -695,7 +737,7 @@ function updateHealPickup() {
 // ------------------------------------------------------------------ tanks
 // the look a tank is drawn with: the garage preview for yourself while it is open, else the roster's
 function lookFor(id) {
-  if (id === '__preview') return preview.look || DEFAULT_LOOK;
+  if (id === '__preview') return preview.look || pui?.look || DEFAULT_LOOK;   // garage draft, else your saved look
   if (id === myId && preview.look) return preview.look;
   return roster.get(id)?.look || (id === myId ? pui?.look : null) || DEFAULT_LOOK;
 }
@@ -1083,19 +1125,21 @@ function lineOfSight(ax, ay, az, bx, by, bz) {
 }
 
 // garage: the tank sits on the right of the screen (the item list is on the left), slowly turning
-function garagePreview(dt) {
+function garagePreview(dt, centred = false) {
   const v = getTank('__preview');
-  preview.yaw += dt * 0.45;
+  // auto-spin, plus the fling left over from a drag (lobby)
+  if (!preview.held) { preview.spin = (preview.spin || 0) * Math.exp(-3 * dt); preview.yaw += dt * 0.45 + (preview.spin || 0) * dt; }
   const t = performance.now() / 1000;
   const y = HEAL_POS.y + C.hoverHeight;
   placeTank(v, 0, y, 0, preview.yaw, preview.yaw + Math.sin(t * 0.7) * 0.5, 0, 0, true, false, t);
   tankFx(dt);
-  garageCamera(dt, v.pos, true);
+  garageCamera(dt, v.pos, true, centred);
 }
-function garageCamera(dt, pos, fixed) {
+function garageCamera(dt, pos, fixed, centred = false) {
   if (!pos) return;
   const t = performance.now() / 1000;
-  const ang = fixed ? 0.9 : t * 0.25, d = 9.5;
+  const asp = (app.graphicsDevice.width || 16) / (app.graphicsDevice.height || 9);
+  const ang = fixed ? 0.9 : t * 0.25, d = centred && asp < 1.2 ? 9.5 * Math.min(1.9, 1.25 / Math.max(0.45, asp)) : 9.5;
   const cx = pos.x + Math.sin(ang) * d, cz = pos.z + Math.cos(ang) * d, cy = pos.y + 3.2;
   camera.camera.fov = BASE_FOV;
   camera.setPosition(cx, cy, cz);
@@ -1103,8 +1147,8 @@ function garageCamera(dt, pos, fixed) {
   const fxv = pos.x - cx, fzv = pos.z - cz, len = Math.hypot(fxv, fzv);
   const rx = -fzv / len, rz = fxv / len;   // camera right (on the ground plane)
   const aspect = (app.graphicsDevice.width || 16) / (app.graphicsDevice.height || 9);
-  const k = d * Math.tan((BASE_FOV * Math.PI) / 360) * aspect * (innerWidth > 700 ? 0.42 : 0.38);
-  camera.lookAt(pos.x - rx * k, pos.y + 1.0, pos.z - rz * k);
+  const k = centred ? 0 : d * Math.tan((BASE_FOV * Math.PI) / 360) * aspect * (innerWidth > 700 ? 0.42 : 0.38);
+  camera.lookAt(pos.x - rx * k, pos.y + (centred ? 1.7 : 1.0), pos.z - rz * k);
 }
 
 function lobbyCamera() {
@@ -1321,8 +1365,8 @@ function updateAbilityHud(t) {
 // sidearm / special chooser (the lobby and the settings panel share one state)
 function loadoutPicker(el) {
   const opt = (k, a) => `<button type="button" data-k="${k}" data-v="${a.id}"><b>${a.icon}</b><span>${a.name}</span><small>${k === 'side' ? `${a.cd}秒` : ''}</small></button>`;
-  el.innerHTML = `<div class="lo-h">サイドアーム <small>（${document.body.classList.contains('touch') ? 'SUBボタン' : 'Eキー'}・クールダウン制）</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p>
-    <div class="lo-h">必殺技 <small>（${document.body.classList.contains('touch') ? 'SPボタン' : 'Qキー'}・ゲージ満タンで使える）</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p>`;
+  el.innerHTML = `<div class="lo-grp grp-side"><div class="lo-h">サイドアーム <small>（${document.body.classList.contains('touch') ? 'SUBボタン' : 'Eキー'}・クールダウン制）</small></div><div class="lo-opts">${SIDEARMS.map((a) => opt('side', a)).join('')}</div><p class="lo-desc" data-d="side"></p></div>
+    <div class="lo-grp grp-ult"><div class="lo-h">必殺技 <small>（${document.body.classList.contains('touch') ? 'SPボタン' : 'Qキー'}・ゲージ満タンで使える）</small></div><div class="lo-opts">${ULTS.map((a) => opt('ult', a)).join('')}</div><p class="lo-desc" data-d="ult"></p></div>`;
   const paint = () => {
     el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(loadout[b.dataset.k] === b.dataset.v)));
     const S = SIDE[loadout.side], U = ULT[loadout.ult];
@@ -1334,6 +1378,9 @@ function loadoutPicker(el) {
     const touch = document.body.classList.contains('touch'), S = SIDE[loadout.side], U = ULT[loadout.ult];
     const html = `<span class="lo-i"><b>${S.icon}</b><span class="lo-n">${S.name}</span><kbd>${touch ? 'SUB' : 'E'}</kbd></span><span class="lo-i"><b>${U.icon}</b><span class="lo-n">${U.name}</span><kbd>${touch ? 'SP' : 'Q'}</kbd></span><span class="lo-edit">変更</span>`;
     document.querySelectorAll('.lo-sum').forEach((e) => { e.innerHTML = html; });
+    // lobby: one big icon per slot
+    $('btn-loadout').innerHTML = `<b class="ic">${S.icon}</b><span class="tx"><small>サイドアーム</small><span class="nm">${S.name}</span></span><kbd>${touch ? 'SUB' : 'E'}</kbd>`;
+    $('btn-lo-ult').innerHTML = `<b class="ic">${U.icon}</b><span class="tx"><small>必殺技</small><span class="nm">${U.name}</span></span><kbd>${touch ? 'SP' : 'Q'}</kbd>`;
   };
   loadoutPickers.push(paintSummary);
   paintSummary();

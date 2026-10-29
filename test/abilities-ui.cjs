@@ -19,15 +19,18 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   await A.goto(URL + '/?debug', { waitUntil: 'domcontentloaded' }); await ready(A);
 
   // ---- lobby picker
-  await A.click('#btn-loadout');
-  await A.click('#loadout-picker [data-k="side"][data-v="shield"]');
+  await A.click('#btn-loadout');   // tap the sidearm icon: only sidearms are offered
+  ok(await A.evaluate(() => getComputedStyle(document.querySelector('#loadout .grp-ult')).display === 'none'), 'sidearm icon opens the sidearm choices only');
+  await A.click('#loadout-picker [data-k="side"][data-v="shield"]'); await A.click('#btn-lo-close');
+  await A.click('#btn-lo-ult');
   await A.click('#loadout-picker [data-k="ult"][data-v="strike"]');
   const lo = await A.evaluate(() => JSON.parse(localStorage.getItem('ht-loadout')));
   ok(lo.side === 'shield' && lo.ult === 'strike', `loadout saved: ${JSON.stringify(lo)}`);
   ok(await A.evaluate(() => document.querySelector('#btn-loadout').textContent.includes('リフレクトシールド') && document.querySelector('#btn-loadout2').textContent.includes('エアストライク')), 'lobby and settings summaries follow the picker');
-  await A.screenshot({ path: 'scratch/shots/ab-lobby.png' });
+  await A.screenshot({ path: 'scratch/shots/ab-lobby.png' }); await A.click('#btn-lo-close');
   // back to dash + mega for the fight
-  await A.click('#loadout-picker [data-k="side"][data-v="dash"]'); await A.click('#loadout-picker [data-k="ult"][data-v="mega"]'); await A.click('#btn-lo-close');
+  await A.click('#btn-lo-ult'); await A.click('#loadout-picker [data-k="ult"][data-v="mega"]'); await A.click('#btn-lo-close');
+  await A.click('#btn-loadout'); await A.click('#loadout-picker [data-k="side"][data-v="dash"]'); await A.click('#btn-lo-close');
 
   await A.click('#tab-btn-phrase'); await A.click('#btn-create'); await A.waitForTimeout(1500); await A.click('#btn-invite-close');
   const inv = await A.inputValue('#invite-url');
