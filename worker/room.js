@@ -142,6 +142,8 @@ export class BattleRoom extends DurableObject {
         this.ctx.storage.put('rules', this.game.rules);
       }
       else if (type === 'team') this.game.onSwitchTeam(id);
+      else if (type === 'ready') this.game.onReady(id);
+      else if (type === 'nextrules') { if (!this.public && data && typeof data === 'object') { this.game.onNextRules(id, data.rules); this.ctx.storage.put('rules', this.game.rules); } }
       else if (type === 'prof') this.attachProfile(id, data);
       else if (type === 'loadout') this.game.onLoadout(id, data);
       else if (type === 'look') { const p = this.game.players.get(id); if (p?.prof) this.attachProfile(id, null, p.prof.key); }

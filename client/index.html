@@ -176,7 +176,15 @@
     <div class="row"><button id="btn-fullscreen" type="button">全画面</button><button id="btn-leave" type="button">退出</button><button id="btn-settings-close" type="button">閉じる</button></div>
   </div>
 
-  <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><div id="result-xp"></div><p id="result-next"></p><div class="row"><button id="btn-result-newgame" type="button">すぐに次の試合へ</button></div></div>
+  <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><div id="result-xp"></div>
+    <p id="result-next" class="note"></p>
+    <div id="result-rules-box" class="hidden"><div id="result-rules" class="rules"></div><div class="row"><button id="btn-res-rules-ok" type="button">このルールにする</button><button id="btn-res-rules-cancel" type="button" class="ghost">やめる</button></div></div>
+    <div class="res-actions">
+      <button id="btn-res-next" type="button" class="res-next">次の試合</button>
+      <div class="res-sub"><button id="btn-res-loadout" type="button">装備を変える</button><button id="btn-res-rules" type="button">ルール変更</button><button id="btn-res-lobby" type="button">ロビーへ戻る</button></div>
+    </div></div>
+  <!-- after a match in a private room: who is ready, and "free fire" while waiting -->
+  <div id="ready-bar" class="hidden"><span id="ready-text"></span><button id="btn-ready" type="button">次の試合へ</button><button id="btn-ready-result" type="button" class="ghost">結果</button></div>
   <div id="banner" class="hidden"></div>
   <div id="rotate">端末を横向きにしてください</div>
   <div id="loading" class="hidden"><div class="spinner"></div><p id="loading-text">読み込み中…</p></div>

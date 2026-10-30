@@ -1,4 +1,4 @@
-// End-of-match flow: play -> result (10 s) -> next match.
+// End-of-match flow: play -> result (stays there: the next match starts when everyone is ready, see test/result-flow.mjs).
 //   npx wrangler dev --var MATCH_SECONDS:8   then   URL=http://localhost:8787 node test/match-end.mjs
 const URL = process.env.URL || 'http://localhost:8787';
 const { id } = await (await fetch(`${URL}/api/rooms`, { method: 'POST' })).json();

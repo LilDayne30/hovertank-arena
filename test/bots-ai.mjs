@@ -82,12 +82,10 @@ function run(levels, seconds, rules = {}) {
   g.removePlayer('h2');
   ok(g.botCount === 2 && g.players.size === 3, 'a person leaving mid-match: seat stays empty (no bot pops in)');
   steps(g, 20.5);
-  ok(g.phase === 'end' && g.open, 'between matches the room opens again');
-  g.addPlayer('h3', 'newcomer');
-  ok(g.humans === 2 && g.players.size <= 4, `newcomer joins during the result screen (${g.humans} people, ${g.botCount} bots)`);
-  steps(g, 10.5);
-  ok(g.phase === 'play' && g.players.size === 4 && g.botCount === 2, `next match starts full: ${g.humans} people + ${g.botCount} bots`);
-  g.removePlayer('h1'); g.removePlayer('h3');
+  ok(g.phase === 'end' && !g.open, 'after the match the room stays closed (players re-match from the result screen)');
+  steps(g, 15);
+  ok(g.phase === 'end', 'no automatic next match in a finished quick-match room');
+  g.removePlayer('h1');
   ok(g.players.size === 0, 'last person leaves -> bots leave too');
 
   // full of people during the wait: starts at once

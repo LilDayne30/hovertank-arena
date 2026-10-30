@@ -63,6 +63,14 @@ const EN = {
   'SUBボタン': 'SUB button', 'Eキー': 'E key', '（クールダウン{n}秒）': ' (cooldown {n}s)', 'コツ：{t}': 'Tip: {t}',
   '赤チーム': 'Red team', '青チーム': 'Blue team', '{a}・{b}': '{a} · {b}',
 
+  // ---------------------------------------------------------------- after a match
+  '次の試合': 'Next match', '装備を変える': 'Change loadout', 'ルール変更': 'Change rules', 'ロビーへ戻る': 'Back to lobby', 'このルールにする': 'Use these rules', 'やめる': 'Cancel',
+  '次の試合へ': 'Ready', '結果': 'Results', '「次の試合」ですぐに次の対戦相手を探します': '"Next match" finds new opponents right away',
+  '準備OK {a}/{b}　全員そろうと次の試合が始まります': 'Ready {a}/{b} · the next match starts when everyone is ready', '（{n} を待っています）': ' (waiting for {n})',
+  '自由砲撃タイム　準備OK {a}/{b}（全員そろうと次の試合）': 'Free fire · ready {a}/{b} (next match when everyone is ready)', '次の試合の準備 {a}/{b}': 'Next match: ready {a}/{b}',
+  '準備OK！ほかの人を待つあいだ自由に撃てます': 'Ready! Shoot freely while the others get ready', '{n} が準備OK': '{n} is ready',
+  '{n} が次の試合のルールを変更しました（{r}）': '{n} changed the rules for the next match ({r})', '次の試合スタート！': 'Next match — go!', '自由砲撃': 'Free fire',
+
   // ---------------------------------------------------------------- net.js
   '部屋を作れませんでした ({s})': 'Could not create a room ({s})', 'この合言葉の部屋は満室です': 'The room for this passphrase is full',
   '合言葉は2〜16文字にしてください': 'Passphrases are 2 to 16 characters', '部屋に入れませんでした ({s})': 'Could not enter the room ({s})',

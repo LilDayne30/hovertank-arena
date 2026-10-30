@@ -64,7 +64,39 @@ export class Game {
 
   // quick match: nobody joins a match in progress. New people are let in while a fresh room is
   // still gathering players ('wait') and between matches ('end'); bots fill seats only at match start.
-  get open() { return this.autoFill && (this.phase === 'wait' || this.phase === 'end') && this.humans < this.capacity; }
+  // (a finished quick-match room is not reused: everyone gets matched again from the result screen)
+  get open() { return this.autoFill && this.phase === 'wait' && this.humans < this.capacity; }
+  // after a match: 'end' lasts until everyone in a private room is ready ("free fire" for the ready ones)
+  get practice() { return this.phase === 'end'; }
+  readyState() {
+    const hs = [...this.players.values()].filter((p) => !p.bot && p.connected);
+    return { ready: hs.filter((p) => p.ready).length, total: hs.length };
+  }
+  // the player pressed "next match" on the result screen (private rooms)
+  onReady(id) {
+    const p = this.players.get(id);
+    if (!p || this.phase !== 'end' || p.ready) return;
+    p.ready = true;
+    p.invulnUntil = 0;
+    if (!p.alive) this.spawn(p);
+    this.queuedEvents.push({ t: 'ready', v: id });
+    this.sendRoster();
+    this.checkReady();
+  }
+  checkReady() {
+    if (this.phase !== 'end' || this.autoFill) return;
+    const { ready, total } = this.readyState();
+    if (total > 0 && ready >= total) { this.beginMatch(); this.queuedEvents.push({ t: 'start' }); }
+  }
+  // rules for the next match, changed from the result screen (private rooms): everyone confirms again
+  onNextRules(id, rules) {
+    const p = this.players.get(id);
+    if (!p || this.phase !== 'end' || this.autoFill) return;
+    this.setRules(rules);
+    for (const o of this.players.values()) if (!o.bot) o.ready = false;
+    this.queuedEvents.push({ t: 'rules', by: id, rules: this.rules });
+    this.sendRoster();
+  }
   startWait() {
     this.phase = 'wait';
     this.phaseEnds = this.time + this.waitSeconds;
@@ -200,6 +232,8 @@ export class Game {
     p.team = this.smallerTeam(p);
     this.players.set(id, p);
     this.spawn(p);
+    if (this.phase === 'end' && !p.bot) p.invulnUntil = Infinity;
+    if (this.phase === 'end' && p.bot) p.ready = !this.autoFill;
     if (!p.bot && !(this.autoFill && this.phase === 'play')) this.syncBots();
     this.sendRoster();
     if (this.autoFill && this.phase === 'wait' && this.humans >= this.capacity) this.beginMatch();   // full: no need to wait
@@ -210,6 +244,7 @@ export class Game {
     const p = this.players.get(id);
     this.players.delete(id);
     this.shells = this.shells.filter((s) => s.owner !== id);
+    if (p && !p.bot) this.queuedEvents.push({ t: 'checkready' });
     // quick match: a seat left during a match stays empty until the next match starts
     if (p && !p.bot && !quiet && (!this.autoFill || this.phase !== 'play' || this.humans === 0)) this.syncBots();
     this.sendRoster();
@@ -219,6 +254,7 @@ export class Game {
     const p = this.players.get(id);
     if (!p) return;
     p.connected = on;
+    if (!on) this.queuedEvents.push({ t: 'checkready' });
     p.queue.length = 0;
     p.lastQueued = 0;
     this.sendRoster();
@@ -270,7 +306,7 @@ export class Game {
     this.matchStart = this.time;
     this.matchNo++;
     this.mines.length = 0; this.strikes.length = 0;
-    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.m = freshStats(); p.joinedAt = this.time; if (p.tank) p.tank.ult = 0; this.spawn(p); }
+    for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.ready = false; p.m = freshStats(); p.joinedAt = this.time; if (p.tank) p.tank.ult = 0; this.spawn(p); }
     if (this.autoFill) this.syncBots();
   }
 
@@ -299,8 +335,9 @@ export class Game {
 
   endMatch() {
     this.phase = 'end';
-    this.phaseEnds = this.time + RESULT_SECONDS;
-    this.shells.length = 0;
+    this.phaseEnds = Infinity;   // no automatic next match (private: when all are ready; quick match: players re-match)
+    this.shells.length = 0; this.mines.length = 0; this.strikes.length = 0;
+    for (const p of this.players.values()) { p.ready = !!p.bot && !this.autoFill; if (!p.bot) p.invulnUntil = Infinity; }   // not ready = on the result screen, untouchable
     const list = this.scoreboard();
     let winner;
     if (this.teamMode) {
@@ -352,8 +389,9 @@ export class Game {
     const w = this.world;
     this.tick++;
     this.time += DT;
-    const events = this.queuedEvents;
+    let events = this.queuedEvents;
     this.queuedEvents = [];
+    if (events.some((e) => e.t === 'checkready')) { events = events.filter((e) => e.t !== 'checkready'); this.checkReady(); events.push(...this.queuedEvents); this.queuedEvents = []; }
 
     if (this.time >= this.phaseEnds) {
       if (this.phase === 'play') {
@@ -369,7 +407,7 @@ export class Game {
       if (!p.alive) {
         if (p.queue.length) { p.lastSeq = p.queue[p.queue.length - 1].seq; p.queue.length = 0; }
         p.credits = 0;
-        if (p.connected && this.phase === 'play' && this.time >= p.respawnAt) this.spawn(p);
+        if (p.connected && (this.phase === 'play' || (this.practice && p.ready)) && this.time >= p.respawnAt) this.spawn(p);
         continue;
       }
       if (!p.connected) continue;   // frozen & invisible while its seat is held for reconnection
@@ -380,7 +418,7 @@ export class Game {
         p.credits -= 1;
         let inp = p.queue.shift();
         p.lastSeq = inp.seq;
-        if (this.phase !== 'play') inp = { ...inp, f: false, a: false, u: false };
+        if (this.phase !== 'play' && !(this.practice && p.ready)) inp = { ...inp, f: false, a: false, u: false };
         const t = p.tank;
         const ev = stepTank(t, inp, w);
         this.abilityEvents(p, ev, events);
@@ -391,7 +429,7 @@ export class Game {
           if (ev.boost) { p.m.turbo++; if (ev.boost >= 2) p.m.orange++; }
         }
         if (ev.fired) {
-          p.m.shots++;
+          if (this.phase === 'play') p.m.shots++;
           // how the shot was fired (for missions): airborne, boosting, from the hill top
           const onHill = t.grounded && heightAt(w, t.x, t.z) > 2.0 && Math.hypot(t.x, t.z) < 7;
           this.shells.push({ id: this.shellId++, owner: p.id, seq: ev.fireSeq, ...projectile(t, 'shell'),
@@ -463,7 +501,7 @@ export class Game {
         this.shells.splice(i, 1);
       }
     }
-    if (this.phase === 'play') { this.stepMines(alive, events); this.stepStrikes(events); }
+    if (this.phase === 'play' || this.practice) { this.stepMines(alive, events); this.stepStrikes(events); }
     // first-to-N kills: end as soon as a player (or team) reaches the target
     if (this.phase === 'play' && this.rules.goal === 'kills') {
       const best = this.teamMode ? Math.max(...this.teamKills()) : Math.max(0, ...[...this.players.values()].map((p) => p.kills));
@@ -477,7 +515,7 @@ export class Game {
     if (!p.alive) return;
     p.hp -= dmg;
     const owner = this.players.get(ownerId);
-    if (owner) { owner.m.hits++; owner.m.dmg += dmg; if (owner.tank) owner.tank.ult = Math.min(ULT_MAX, owner.tank.ult + ULT_GAIN.hit); }
+    if (owner && this.phase === 'play') { owner.m.hits++; owner.m.dmg += dmg; if (owner.tank) owner.tank.ult = Math.min(ULT_MAX, owner.tank.ult + ULT_GAIN.hit); }
     events.push({ t: 'hit', o: ownerId, v: p.id, hp: Math.max(0, p.hp), d: dmg, ...ev });
     if (p.hp <= 0) this.kill(p, ownerId, events, info);
   }
@@ -584,9 +622,11 @@ export class Game {
   }
 
   kill(p, killerId, events, shell) {
-    p.alive = false; p.hp = 0; p.deaths++; p.m.deaths++;
+    p.alive = false; p.hp = 0;
     p.respawnAt = this.time + C.respawnTime;
     const k = this.players.get(killerId);
+    if (this.practice) { events.push({ t: 'kill', k: killerId, v: p.id, x: r2(p.tank.x), y: r2(p.tank.y), z: r2(p.tank.z), pr: 1 }); return; }   // free fire: no score
+    p.deaths++; p.m.deaths++;
     if (k && !(this.teamMode && k.team === p.team)) {
       k.kills++; k.m.kills++;
       if (k.tank) k.tank.ult = Math.min(ULT_MAX, k.tank.ult + ULT_GAIN.kill);
@@ -633,12 +673,12 @@ export class Game {
         p.hp, flags, p.lastSeq, r3(t.cooldown), t.shotSeq, p.kills, p.deaths, p.spawnId,
         p.alive ? 0 : Math.max(0, Math.round((p.respawnAt - this.time) * 10) / 10),
         r3(t.charge), r3(t.boost), t.boostLvl,
-        this.time < p.invulnUntil ? Math.round((p.invulnUntil - this.time) * 10) / 10 : 0,
+        this.time < p.invulnUntil ? Math.min(99, Math.round((p.invulnUntil - this.time) * 10) / 10) : 0,
         r2(t.sideCd), Math.floor(t.ult), r3(t.shieldT), r3(t.shieldAge), r3(t.odT), t.slam, SIDE[t.side].index, ULT[t.ultK].index, r3(t.dashT)]);
     }
     const B = this.shells.map((s) => [s.id, s.owner, s.seq, r2(s.x), r2(s.y), r2(s.z), r2(s.vx), r2(s.vy), r2(s.vz), SHELL_KINDS.indexOf(s.kind), s.bounce || 0]);
     const MN = this.mines.map((m) => [m.id, m.owner, r2(m.x), r2(m.y), r2(m.z), this.time >= m.armAt ? 1 : 0]);
-    this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Math.max(0, Math.round(this.phaseEnds - this.time)), p: P, b: B, e: events,
+    this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Number.isFinite(this.phaseEnds) ? Math.max(0, Math.round(this.phaseEnds - this.time)) : 0, p: P, b: B, e: events,
       hl: this.heal.active ? 1 : 0, hn: this.heal.active ? 0 : Math.max(0, Math.ceil(this.heal.nextAt - this.time)),
       tk: this.teamMode ? this.teamKills() : undefined, mn: MN.length ? MN : undefined });
   }
@@ -653,7 +693,7 @@ export class Game {
     this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
       id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
       // private rooms label CPU players; quick-match bots look like everyone else
-      bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined, lo: p.loadout,
+      bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined, lo: p.loadout, ready: p.ready ? 1 : undefined,
     })) });
   }
 }
