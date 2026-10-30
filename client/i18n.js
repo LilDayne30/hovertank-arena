@@ -135,6 +135,13 @@ const EN = {
   'コツコツ': 'Steady', 'デイリーミッションを30個達成する': 'Finish 30 daily missions', '皆勤賞': 'Perfect Attendance', 'デイリーミッションを150個達成する': 'Finish 150 daily missions',
 
   // ---------------------------------------------------------------- sidearms / specials (shared/abilities.js)
+  '車体の後ろに地雷を置く（30秒）。0.8秒後に作動し、敵が3m以内に入ると爆発。ステージ全体で2個まで：3個目が置かれると一番古い地雷がその場で爆発する。':
+    'Drops a mine behind you (lasts 30 s). Arms after 0.8 s and blows up when an enemy comes within 3 m. Only 2 mines on the whole stage: when a third is laid, the oldest one explodes where it is.',
+  '速くまっすぐ飛び、壁や地面で3回まで跳ね返る砲弾。跳ねるたびに威力が上がり（30→50→70→90）、当たるとまわりにも爆風。':
+    'A fast, flat shell that ricochets off walls and the ground up to 3 times. Every ricochet makes it stronger (30 → 50 → 70 → 90), and it bursts on impact.',
+  '壁に当ててから当てるほど強い。遮蔽物の裏の相手を跳弾でしとめる': 'The more walls it hits first, the harder it hits. Bank it around cover to finish off hiding enemies',
+  '高く跳んで急降下。跳んでいるあいだは無敵。着地点のまわり8mに衝撃波（最大55ダメージ）と吹き飛ばし。空中で使うとすぐ急降下。':
+    'Leap high and dive; you are untouchable while airborne. The landing sends out an 8 m shockwave (up to 55 damage) that knocks tanks away. In the air it dives at once.',
   'ブーストダッシュ': 'Boost Dash', 'リフレクトシールド': 'Reflect Shield', '地雷': 'Mine', 'バウンド弾': 'Bounce Shell',
   'オーバードライブ': 'Overdrive', 'メガキャノン': 'Mega Cannon', 'エアストライク': 'Air Strike', 'グラウンドスラム': 'Ground Slam',
   '押した瞬間、入力している方向へ一気に加速（空中でも可）。弾をかわす・距離を詰める・ドリフトターボとつなげる。': 'A burst of speed in the direction you are steering (works in the air too). Dodge shells, close in, or chain it into a drift turbo.',

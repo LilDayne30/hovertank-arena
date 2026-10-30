@@ -317,7 +317,12 @@ export function stepTank(t, inp, w, dt = DT) {
 // projectile spawn for the main gun ('shell'), the bounce sidearm and the mega cannon
 export function projectile(t, kind = 'shell') {
   const m = muzzle(t);
-  if (kind === 'bounce') return { ...m, kind, bounce: SIDE.bounce.bounces, life: C.shellLife + 0.6 };
+  if (kind === 'bounce') {
+    // fast and flat (easy to bank off walls); gets stronger with every ricochet (see game.js)
+    const B = SIDE.bounce, cp = Math.cos(t.aimPitch);
+    const dx = -Math.sin(t.aimYaw) * cp, dy = Math.sin(t.aimPitch), dz = -Math.cos(t.aimYaw) * cp;
+    return { ...m, vx: dx * B.speed, vy: dy * B.speed + 0.8, vz: dz * B.speed, kind, bounce: B.bounces, g: B.gravity, life: B.life };
+  }
   if (kind === 'mega') {
     const U = ULT.mega, cp = Math.cos(t.aimPitch);
     const dx = -Math.sin(t.aimYaw) * cp, dy = Math.sin(t.aimPitch), dz = -Math.cos(t.aimYaw) * cp;
@@ -361,7 +366,7 @@ export function stepShell(s, w, dt = DT) {
   s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
   s.life -= dt;
   // sample terrain along the segment (a shell moves 2-5 m per tick)
-  const n = s.kind === 'mega' ? 8 : 4;
+  const n = s.kind === 'mega' || s.kind === 'bounce' ? 8 : 4;
   let lx = s.px, ly = s.py, lz = s.pz;
   for (let k = 1; k <= n; k++) {
     const f = k / n;

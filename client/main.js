@@ -705,6 +705,8 @@ function makeMaterials() {
   });
   mats.slotLit = PLAYER_COLORS.map((c) => { const m = new pc.StandardMaterial(); m.diffuse = new pc.Color(...c); m.update(); return m; });
   mats.bounceShell = fx.col([0.6, 1, 0.35], true, 1); mats.bouncePuff = fx.col([0.55, 1, 0.4]);
+  const bc = [[0.6, 1, 0.35], [0.85, 1, 0.3], [1, 0.75, 0.2], [1, 0.4, 0.15]];   // 0..3 ricochets
+  mats.bounceLv = bc.map((c) => fx.col(c, true, 1)); mats.bouncePuffLv = bc.map((c) => fx.col(c));
   mats.megaShell = fx.col([1, 0.45, 1], true, 1);
   mats.mineBody = (() => { const m = new pc.StandardMaterial(); m.diffuse = new pc.Color(0.16, 0.15, 0.14); m.update(); return m; })();
   mats.mineMine = fx.col([0.35, 0.8, 1], true, 1); mats.mineEnemy = fx.col([1, 0.2, 0.1], true, 1); mats.mineOff = fx.col([0.5, 0.45, 0.4]);
@@ -854,17 +856,18 @@ function placeTank(v, x, y, z, yaw, aimYaw, vx, vz, visible, invuln, time) {
   v.hover.setEulerAngles(0, yaw * pc.math.RAD_TO_DEG, 0);
   // spawn shield: steady bubble, blinks in its last half second
   // reflect shield (sidearm): brighter and bigger; white during the perfect-guard window
-  const guard = v.shieldT > 0;
-  v.shield.enabled = guard || (invuln && (v.invulnLeft > 0.5 || Math.floor(time * 12) % 2 === 0));
+  const guard = v.shieldT > 0, slamming = !!v.slam;
+  v.shield.enabled = guard || slamming || (invuln && (v.invulnLeft > 0.5 || Math.floor(time * 12) % 2 === 0));
   if (v.shield.enabled) {
     const perfect = guard && v.shieldAge <= SIDE.shield.perfect;
-    const mode = perfect ? 2 : guard ? 1 : 0;
+    const mode = slamming ? 3 : perfect ? 2 : guard ? 1 : 0;
     if (v.shieldMode !== mode) {
       v.shieldMode = mode;
-      v.shieldMat.emissive = mode === 2 ? new pc.Color(1, 1, 1) : mode === 1 ? new pc.Color(0.45, 0.95, 1) : new pc.Color(0.4, 0.85, 1);
+      v.shieldMat.emissive = mode === 3 ? new pc.Color(1, 0.78, 0.3) : mode === 2 ? new pc.Color(1, 1, 1) : mode === 1 ? new pc.Color(0.45, 0.95, 1) : new pc.Color(0.4, 0.85, 1);
       const k = mode ? 1.12 : 1; v.shield.setLocalScale(5.2 * k, 3.6 * k, 5.6 * k);
     }
-    v.shieldMat.opacity = mode === 2 ? 0.75 : mode === 1 ? 0.38 + Math.sin(time * 14) * 0.08 + (v.shieldT < 0.4 && Math.floor(time * 14) % 2 ? -0.25 : 0) : 0.22 + Math.sin(time * 6) * 0.08;
+    v.shieldMat.opacity = mode === 3 ? (v === tanks.get(myId) ? 0.14 : 0.42) + Math.sin(time * 18) * 0.05 : mode === 2 ? 0.75 :   // own slam bubble faint (camera is close)
+ mode === 1 ? 0.38 + Math.sin(time * 14) * 0.08 + (v.shieldT < 0.4 && Math.floor(time * 14) % 2 ? -0.25 : 0) : 0.22 + Math.sin(time * 6) * 0.08;
     v.shieldMat.update();
   }
 }
@@ -942,7 +945,7 @@ function renderRemote(rt) {
   const used = new Set();
   for (const s of a.shells) {
     if (s.owner === myId && !reflected.has(s.id)) continue;
-    const dt = (rt - a.k) * DT, g = s.kind === 'mega' ? ULT.mega.gravity : C.shellGravity;
+    const dt = (rt - a.k) * DT, g = s.kind === 'mega' ? ULT.mega.gravity : s.kind === 'bounce' ? SIDE.bounce.gravity : C.shellGravity;
     const px = s.x + s.vx * dt, py = s.y + s.vy * dt - 0.5 * g * dt * dt, pz = s.z + s.vz * dt;
     if (!seenShells.has(s.id)) {
       seenShells.add(s.id);
@@ -954,7 +957,7 @@ function renderRemote(rt) {
       }
       if (seenShells.size > 300) seenShells.clear();
     }
-    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - g * dt, s.vz, s.owner, s.kind);
+    drawShell(`r${s.id}`, px, py, pz, s.vx, s.vy - g * dt, s.vz, s.owner, s.kind, s.bounce);
     used.add(`r${s.id}`);
   }
   for (const [key, e] of shellEnts) if (key[0] === 'r' && !used.has(key)) freeShell(key, e);
@@ -989,7 +992,7 @@ function updateMines(list) {
 function flushEvents(rt) {
   while (pendingEvents.length && pendingEvents[0].k <= rt + 0.5) {
     const { e } = pendingEvents.shift();
-    if (e.t === 'boom') { if (e.o !== myId && e.k !== 2) { fx.explosion(e.x, e.y, e.z, 1.6); sound.boom(e, 1); } }
+    if (e.t === 'boom') { if (e.o !== myId && e.k !== 2) { if (e.k === 3) fx.bounceBlast(e.x, e.y, e.z); else fx.explosion(e.x, e.y, e.z, 1.6); sound.boom(e, e.k === 3 ? 1.3 : 1); } }
     else if (abilityEvent(e)) { /* handled */ }
     else if (e.t === 'hit') {
       fx.hitSpark(e.x, e.y, e.z);
@@ -1012,7 +1015,7 @@ function flushEvents(rt) {
       fx.killStyle(e.x, e.y, e.z, vt?.mats?.[0] || mats.slotLit[(roster.get(e.v)?.slot ?? 0) % 4], roster.get(e.k)?.look?.boom, { groundY: heightAt(world, e.x, e.z), big: mine || me });
       feed(e.k, e.v);
       sound.kill(e, mine, me);
-      if (me) { centerFlash(tr('撃破された…'), 1800); hitStop(180); screenFlash('death'); sound.impact(); fovKick = 10; }
+      if (me) { centerFlash(tr('撃破された…'), 1800); screenFlash('death'); fovKick = 10; }   // (no hit stop on your own death: it read as lag)
       else if (mine) { centerFlash(tr('撃破！'), 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; }
     }
   }
@@ -1186,7 +1189,7 @@ function lobbyCamera() {
 
 // ------------------------------------------------------------------ shells
 const shellEnts = new Map(), shellPool = [];
-function drawShell(key, x, y, z, vx, vy, vz, owner, kind = 'shell') {
+function drawShell(key, x, y, z, vx, vy, vz, owner, kind = 'shell', bounceLeft = 0) {
   const trail = tanks.get(owner)?.trail;
   let e = shellEnts.get(key);
   if (!e) {
@@ -1207,7 +1210,10 @@ function drawShell(key, x, y, z, vx, vy, vz, owner, kind = 'shell') {
   const sp = Math.hypot(vx, vy, vz) || 1;
   e.lookAt(x + vx / sp, y + vy / sp, z + vz / sp);
   if (kind === 'mega') { e.setLocalScale(0.8, 0.8, 3.4); e.render.material = mats.megaShell; fx.megaTrail(x, y, z); return; }
-  if (kind === 'bounce') { e.setLocalScale(0.36, 0.36, 1.5); e.render.material = mats.bounceShell; fx.trail(x, y, z, false, mats.bouncePuff); return; }
+  if (kind === 'bounce') {   // grows and heats up with every ricochet (= more damage)
+    const n = SIDE.bounce.bounces - bounceLeft, k = 1 + n * 0.35;
+    e.setLocalScale(0.36 * k, 0.36 * k, 1.5 * k); e.render.material = mats.bounceLv[n] || mats.bounceShell; fx.trail(x, y, z, n >= 2, mats.bouncePuffLv[n] || mats.bouncePuff); return;
+  }
   e.setLocalScale(0.28, 0.28, 1.9);
   e.render.material = trail?.shell || fx.m.shell;
   fx.trail(x, y, z, false, trail?.puff);
@@ -1229,7 +1235,7 @@ function killLocalShell(q, boom = true, mega = false) {
   const s = localShells[i];
   if (s.kind === 'mega' && (boom || mega || !megaShown.has(s.seq))) {
     if (!megaShown.has(s.seq)) { megaShown.add(s.seq); if (megaShown.size > 50) megaShown.delete(megaShown.values().next().value); fx.megaBlast(s.x, s.y, s.z, heightAt(world, s.x, s.z)); sound.bigBoom(s, 1.8); }
-  } else if (boom) { fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, 1); }
+  } else if (boom) { if (s.kind === 'bounce') fx.bounceBlast(s.x, s.y, s.z); else fx.explosion(s.x, s.y, s.z, 1.6); sound.boom(s, s.kind === 'bounce' ? 1.3 : 1); }
   const key = `l${s.seq}`; const e = shellEnts.get(key);
   if (e) freeShell(key, e);
   localShells.splice(i, 1);
@@ -1251,7 +1257,7 @@ function updateLocalShells(dt) {
     }
     if (dead) { killLocalShell(s.seq, false, true); continue; }
     const f = s.acc / DT;
-    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz, myId, s.kind);
+    drawShell(`l${s.seq}`, s.x + s.vx * DT * f, s.y + s.vy * DT * f, s.z + s.vz * DT * f, s.vx, s.vy, s.vz, myId, s.kind, s.bounce);
   }
 }
 

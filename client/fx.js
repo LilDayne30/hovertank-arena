@@ -453,6 +453,10 @@ export class Fx {
       this.add({ shape: 'box', mat: this.m.yellow, x, y, z, vx: Math.cos(a) * sp, vy: rnd(2, 9), vz: Math.sin(a) * sp, g: 20, life: rnd(0.2, 0.35), s0: 0.12, s1: 0.02, align: true });
     }
   }
+  bounceBlast(x, y, z) {
+    this.explosion(x, y, z, 2.4);
+    this.add({ shape: 'torus', mat: this.col([0.85, 1, 0.3], true, 0.8), x, y, z, life: 0.35, s0: 1, s1: 6.4, sy: 0.08, curve: 'pop' });
+  }
   megaMuzzle(x, y, z, dx, dy, dz) {
     const m = this.m, pink = this.col([1, 0.45, 1], true, 0.45);
     this.muzzle(x, y, z, dx, dy, dz);

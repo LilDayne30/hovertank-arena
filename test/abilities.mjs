@@ -152,3 +152,40 @@ function setup({ ax = 14, az = -32, bx = 34, bz = -32, loadA, loadB } = {}) {
   s.step(1, { f: true }); s.step(20);
   ok(s.A.tank.ult > 9.5 && s.A.tank.ult < 13, `meter after one hit + 0.7 s: ${s.A.tank.ult.toFixed(1)} (hit +10, +1.5/s)`);
 }
+
+// ---------------------------------------------------------------- bounce shell rework: stronger after each ricochet, splash
+{
+  const { bounceDamage } = await import('../shared/game.js');
+  const B = SIDE.bounce;
+  ok([3, 2, 1, 0].map((b) => bounceDamage({ bounce: b })).join('/') === '30/50/70/90', `bounce damage by ricochets: ${[3, 2, 1, 0].map((b) => bounceDamage({ bounce: b })).join(' / ')}`);
+  // straight shot at a tank 20 m away: direct hit with no bounce = 30
+  const s = setup({ ax: 14, bx: 34, loadA: { side: 'bounce' } });
+  s.step(1, { a: true }); s.step(30);
+  ok(s.B.hp === 100 - B.damage, `direct bounce-shell hit (no ricochet): B ${s.B.hp} HP`);
+  // bank shot: A behind the east wall (x 25..26.5) shoots at it; B stands where the ricochet goes
+  const s2 = setup({ ax: 18, az: 0, bx: 34, bz: -34, loadA: { side: 'bounce' } });
+  s2.step(1, { a: true });
+  let hit = null;
+  for (let i = 0; i < 60 && !hit; i++) { s2.step(1); hit = s2.take().find((e) => e.t === 'rico'); }
+  ok(!!hit, `banked off the wall at x ${hit?.x}`);
+}
+// ---------------------------------------------------------------- slam: untouchable in the air
+{
+  const s = setup({ ax: 14, bx: 34, loadA: { ult: 'slam' } });
+  s.A.tank.ult = 100;
+  s.step(1, { u: true });
+  s.step(1, {}, { f: true });           // B shoots at the slamming A
+  let shield = false, landedHp = null;
+  for (let i = 0; i < 60; i++) { s.step(1); if (s.take().some((e) => e.t === 'shield' && e.v === 'A')) shield = true; if (s.A.tank.grounded && landedHp === null) landedHp = s.A.hp; }
+  ok(shield && s.A.hp === 100, `slam: shells bounce off while airborne (A ${s.A.hp} HP)`);
+}
+// ---------------------------------------------------------------- mines: two on the whole stage, the oldest blows up
+{
+  const s = setup({ ax: 14, bx: 30, loadA: { side: 'mine' }, loadB: { side: 'mine' } });
+  s.step(1, { a: true });                       // A's mine #1
+  s.step(1, {}, { a: true });                   // B's mine #2
+  ok(s.g.mines.length === 2, 'two mines on the field');
+  s.A.tank.sideCd = 0; s.step(1, { a: true, mx: 0, mz: 1 });   // a third one (A's second)
+  const e = s.take();
+  ok(s.g.mines.length === 2 && e.some((x) => x.t === 'mineboom' && x.o === 'A'), `third mine: the oldest (A's first) exploded, ${s.g.mines.length} left (${s.g.mines.map((m) => m.owner).join(', ')})`);
+}

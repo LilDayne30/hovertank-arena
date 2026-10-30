@@ -16,6 +16,8 @@ const LONG_KILL = 40;          // m: a kill from farther than this counts as lon
 const ACTIVE_MOVE = 40;        // m driven (or 3 shots) to count as having taken part in a match
 
 // per-player counters for one match (used for XP, missions and titles; never for gameplay)
+// bounce shell damage grows with each ricochet: 30 / 50 / 70 / 90
+export const bounceDamage = (s) => SIDE.bounce.damage + SIDE.bounce.perBounce * (SIDE.bounce.bounces - (s.bounce ?? SIDE.bounce.bounces));
 export const freshStats = () => ({ kills: 0, deaths: 0, hits: 0, dmg: 0, turbo: 0, orange: 0, heals: 0, jumps: 0, air: 0, turboKills: 0, longKills: 0, hillKills: 0, shots: 0, moved: 0 });
 
 export function sanitizeName(n) {
@@ -486,17 +488,19 @@ export class Game {
             break;
           }
           dead = true;
-          if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: s.owner, q: s.seq, v: p.id, x: hx, y: hy, z: hz }); break; }
-          const dmg = s.kind === 'mega' ? ULT.mega.direct : C.damage;
+          if (this.time < p.invulnUntil || p.tank.slam) { events.push({ t: 'shield', o: s.owner, q: s.seq, v: p.id, x: hx, y: hy, z: hz }); break; }
+          const dmg = s.kind === 'mega' ? ULT.mega.direct : s.kind === 'bounce' ? bounceDamage(s) : C.damage;
           this.damage(p, dmg, s.owner, events, s, { s: s.id, q: s.seq, x: hx, y: hy, z: hz });
           if (s.kind === 'mega') this.megaBlast(s, events, p.id);
+          if (s.kind === 'bounce') this.bounceBlast(s, events, p.id, dmg);
           break;
         }
       }
       if (dead) {
         if (hitGround || s.life <= 0) {
-          events.push({ t: 'boom', s: s.id, o: s.owner, q: s.seq, k: s.kind === 'mega' ? 2 : undefined, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
+          events.push({ t: 'boom', s: s.id, o: s.owner, q: s.seq, k: s.kind === 'mega' ? 2 : s.kind === 'bounce' ? 3 : undefined, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
           if (s.kind === 'mega' && hitGround) this.megaBlast(s, events, null);
+          if (s.kind === 'bounce' && hitGround) this.bounceBlast(s, events, null, bounceDamage(s));
         }
         this.shells.splice(i, 1);
       }
@@ -531,13 +535,18 @@ export class Game {
       const f = Math.min(1, d / radius);
       const ex = r2(t.x), ey = r2(t.y + C.hitCenterY), ez = r2(t.z);
       if (t.shieldT > 0) { events.push({ t: 'block', o: ownerId, v: p.id, x: ex, y: ey, z: ez }); continue; }
-      if (this.time < p.invulnUntil) { events.push({ t: 'shield', o: ownerId, v: p.id, x: ex, y: ey, z: ez }); continue; }
+      if (this.time < p.invulnUntil || t.slam) { events.push({ t: 'shield', o: ownerId, v: p.id, x: ex, y: ey, z: ez }); continue; }
       if (kb) {
         const hx = t.x - x, hz = t.z - z, hl = Math.hypot(hx, hz) || 1, k = kb * (1 - f * 0.6);
         t.vx += (hx / hl) * k; t.vz += (hz / hl) * k; t.vy = Math.max(t.vy, k * 0.5); t.grounded = false;
       }
       this.damage(p, Math.round(dmax + (dmin - dmax) * f), ownerId, events, { ox: x, oz: z }, { x: ex, y: ey, z: ez, k: kind });
     }
+  }
+
+  // bounce shell: a small blast where it lands (half its current power at the centre)
+  bounceBlast(s, events, skip, dmg) {
+    this.blast(s.x, s.y, s.z, SIDE.bounce.splash, [Math.round(dmg * 0.5), 8], s.owner, events, { kb: 4, skip, kind: 'bounce' });
   }
 
   megaBlast(s, events, skip) {
@@ -557,8 +566,7 @@ export class Game {
         let mx = t.x - fx * 2.8, mz = t.z - fz * 2.8;
         if (heightAt(w, mx, mz) - (t.y - C.hoverHeight) > C.stepMax) { mx = t.x; mz = t.z; }
         const mine = { id: this.mineId++, owner: p.id, team: p.team, x: mx, y: heightAt(w, mx, mz), z: mz, armAt: this.time + M.arm, until: this.time + M.life };
-        const mineOwn = this.mines.filter((m) => m.owner === p.id);
-        if (mineOwn.length >= M.max) this.mines.splice(this.mines.indexOf(mineOwn[0]), 1);
+        while (this.mines.length >= M.max) this.detonateMine(this.mines.shift(), events);   // stage limit: the oldest goes off
         this.mines.push(mine);
       }
     }
@@ -591,6 +599,11 @@ export class Game {
     }
   }
 
+  detonateMine(m, events) {
+    this.blast(m.x, m.y + 0.6, m.z, SIDE.mine.radius, SIDE.mine.damage, m.owner, events, { kb: 8, kind: 'mine' });
+    events.push({ t: 'mineboom', o: m.owner, x: r2(m.x), y: r2(m.y), z: r2(m.z) });
+  }
+
   stepMines(alive, events) {
     const M = SIDE.mine;
     for (let i = this.mines.length - 1; i >= 0; i--) {
@@ -600,8 +613,7 @@ export class Game {
       const near = alive.find((p) => p.id !== m.owner && !(this.teamMode && p.team === m.team) && Math.hypot(p.tank.x - m.x, p.tank.z - m.z) < M.trigger && Math.abs(p.tank.y - C.hoverHeight - m.y) < 2.5);
       if (!near) continue;
       this.mines.splice(i, 1);
-      this.blast(m.x, m.y + 0.6, m.z, M.radius, M.damage, m.owner, events, { kb: 8, kind: 'mine' });
-      events.push({ t: 'mineboom', o: m.owner, x: r2(m.x), y: r2(m.y), z: r2(m.z) });
+      this.detonateMine(m, events);
     }
   }
 
