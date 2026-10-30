@@ -566,7 +566,11 @@ export class Game {
         let mx = t.x - fx * 2.8, mz = t.z - fz * 2.8;
         if (heightAt(w, mx, mz) - (t.y - C.hoverHeight) > C.stepMax) { mx = t.x; mz = t.z; }
         const mine = { id: this.mineId++, owner: p.id, team: p.team, x: mx, y: heightAt(w, mx, mz), z: mz, armAt: this.time + M.arm, until: this.time + M.life };
-        while (this.mines.length >= M.max) this.detonateMine(this.mines.shift(), events);   // stage limit: the oldest goes off
+        // 2 per player: laying a third sets off your oldest one where it is
+        for (let own = this.mines.filter((m) => m.owner === p.id); own.length >= M.max; own = own.slice(1)) {
+          this.mines.splice(this.mines.indexOf(own[0]), 1);
+          this.detonateMine(own[0], events);
+        }
         this.mines.push(mine);
       }
     }

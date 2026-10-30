@@ -179,13 +179,15 @@ function setup({ ax = 14, az = -32, bx = 34, bz = -32, loadA, loadB } = {}) {
   for (let i = 0; i < 60; i++) { s.step(1); if (s.take().some((e) => e.t === 'shield' && e.v === 'A')) shield = true; if (s.A.tank.grounded && landedHp === null) landedHp = s.A.hp; }
   ok(shield && s.A.hp === 100, `slam: shells bounce off while airborne (A ${s.A.hp} HP)`);
 }
-// ---------------------------------------------------------------- mines: two on the whole stage, the oldest blows up
+// ---------------------------------------------------------------- mines: two per player, your third sets off your oldest
 {
   const s = setup({ ax: 14, bx: 30, loadA: { side: 'mine' }, loadB: { side: 'mine' } });
-  s.step(1, { a: true });                       // A's mine #1
-  s.step(1, {}, { a: true });                   // B's mine #2
-  ok(s.g.mines.length === 2, 'two mines on the field');
-  s.A.tank.sideCd = 0; s.step(1, { a: true, mx: 0, mz: 1 });   // a third one (A's second)
-  const e = s.take();
-  ok(s.g.mines.length === 2 && e.some((x) => x.t === 'mineboom' && x.o === 'A'), `third mine: the oldest (A's first) exploded, ${s.g.mines.length} left (${s.g.mines.map((m) => m.owner).join(', ')})`);
+  s.step(1, { a: true });                                   // A #1
+  s.A.tank.sideCd = 0; s.step(1, { a: true, mx: 0, mz: 1 });   // A #2
+  s.step(1, {}, { a: true });                               // B #1
+  s.take();
+  ok(s.g.mines.length === 3 && !s.take().some((x) => x.t === 'mineboom'), 'B\'s mine does not count against A (3 on the field)');
+  s.A.tank.sideCd = 0; s.step(1, { a: true, mx: 1, mz: 0 });   // A #3
+  const e = s.take(), own = s.g.mines.filter((m) => m.owner === 'A');
+  ok(own.length === 2 && s.g.mines.length === 3 && e.some((x) => x.t === 'mineboom' && x.o === 'A'), `A's third mine: A's oldest exploded (A ${own.length}, total ${s.g.mines.length})`);
 }

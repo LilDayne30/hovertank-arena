@@ -135,8 +135,8 @@ const EN = {
   'コツコツ': 'Steady', 'デイリーミッションを30個達成する': 'Finish 30 daily missions', '皆勤賞': 'Perfect Attendance', 'デイリーミッションを150個達成する': 'Finish 150 daily missions',
 
   // ---------------------------------------------------------------- sidearms / specials (shared/abilities.js)
-  '車体の後ろに地雷を置く（30秒）。0.8秒後に作動し、敵が3m以内に入ると爆発。ステージ全体で2個まで：3個目が置かれると一番古い地雷がその場で爆発する。':
-    'Drops a mine behind you (lasts 30 s). Arms after 0.8 s and blows up when an enemy comes within 3 m. Only 2 mines on the whole stage: when a third is laid, the oldest one explodes where it is.',
+  '車体の後ろに地雷を置く（30秒）。0.8秒後に作動し、敵が3m以内に入ると爆発。置けるのは1人2個まで：3個目を置くと自分の一番古い地雷がその場で爆発する。':
+    'Drops a mine behind you (lasts 30 s). Arms after 0.8 s and blows up when an enemy comes within 3 m. Up to 2 mines each: laying a third sets off your oldest one where it is.',
   '速くまっすぐ飛び、壁や地面で3回まで跳ね返る砲弾。跳ねるたびに威力が上がり（30→50→70→90）、当たるとまわりにも爆風。':
     'A fast, flat shell that ricochets off walls and the ground up to 3 times. Every ricochet makes it stronger (30 → 50 → 70 → 90), and it bursts on impact.',
   '壁に当ててから当てるほど強い。遮蔽物の裏の相手を跳弾でしとめる': 'The more walls it hits first, the harder it hits. Bank it around cover to finish off hiding enemies',
