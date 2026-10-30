@@ -26,6 +26,7 @@ export class BattleRoom extends DurableObject {
     this.tokens = new Map();    // token -> playerId
     this.holds = new Map();     // playerId -> timeout handle (seat kept for reconnection)
     this.loop = null;
+    this.lockstep = !!env.LOCKSTEP;   // dev/recording only: the game advances only as the player's inputs arrive
     this.game = new Game(world, {
       send: (id, type, data) => this.sendTo(id, type, data),
       broadcast: (type, data) => this.broadcast(type, data),
@@ -132,7 +133,7 @@ export class BattleRoom extends DurableObject {
       let msg; try { msg = JSON.parse(ev.data); } catch { return; }
       if (!Array.isArray(msg)) return;
       const [type, data] = msg;
-      if (type === 'i') this.game.onInput(id, data);
+      if (type === 'i') { this.game.onInput(id, data); if (this.lockstep && Array.isArray(data)) for (let k = 0; k < data.length; k++) this.game.step(); }
       else if (type === 'ping') ws.send(JSON.stringify(['pong', data]));
       else if (type === 'name') this.game.onName(id, data);
       else if (type === 'newgame') {
@@ -235,7 +236,7 @@ export class BattleRoom extends DurableObject {
     this.loop = setInterval(() => {
       if (Date.now() - lastReport > 60000) { lastReport = Date.now(); this.report(); }   // heartbeat for the matchmaker
       const now = Date.now();
-      this.game.update((now - last) / 1000);
+      if (!this.lockstep) this.game.update((now - last) / 1000);
       last = now;
     }, 16);
   }
