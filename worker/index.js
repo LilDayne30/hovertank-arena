@@ -74,13 +74,14 @@ export default {
 //   POST /api/profile/transfer  -> { code, expiresAt }  (one-time code, 24 h)
 //   POST /api/profile/redeem    { code }   -> { token, profile }
 async function profileApi(request, env, path, ctx) {
+  const src = /^[a-z0-9_-]{1,24}$/.test(request.headers.get('x-src') || '') ? request.headers.get('x-src') : undefined;   // ?s= tag of an X post etc.
   const codes = env.CODES.get(env.CODES.idFromName('global'));
   const post = (stub, p, body) => stub.fetch(`https://profile${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
   if (path === '/new' && request.method === 'POST') {
     const token = newToken();
     const pkey = await profileKey(token);
     const profile = await (await profileStub(env, pkey).fetch('https://profile/view')).json();
-    statEvent(env, ctx, { type: 'new' }); statEvent(env, ctx, { type: 'open', pkey });
+    statEvent(env, ctx, { type: 'new' }); statEvent(env, ctx, { type: 'open', pkey, src, fresh: true });
     return json({ token, profile });
   }
   if (path === '/redeem' && request.method === 'POST') {
@@ -95,7 +96,7 @@ async function profileApi(request, env, path, ctx) {
   if (!TOKEN_RE.test(token)) return json({ error: 'no profile' }, 401);
   const pkey = await profileKey(token);
   const stub = profileStub(env, pkey);
-  if (path === '' && request.method === 'GET') { statEvent(env, ctx, { type: 'open', pkey }); return stub.fetch('https://profile/view'); }
+  if (path === '' && request.method === 'GET') { statEvent(env, ctx, { type: 'open', pkey, src }); return stub.fetch('https://profile/view'); }
   if (request.method !== 'POST') return json({ error: 'not found' }, 404);
   const body = await request.json().catch(() => ({}));
   if (path === '/look') return post(stub, '/look', { look: body.look });

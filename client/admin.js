@@ -70,6 +70,13 @@ function render() {
   $('kinds').innerHTML = `<tr><th>種類</th><th>試合数</th><th>割合</th></tr>${kr.map(([k, n]) => `<tr><td>${KIND[k] || k}</td><td>${fmt(n)}</td><td>${fmt((n / matches) * 100)}%</td></tr>`).join('') || '<tr><td colspan="3" class="empty">まだ試合がありません</td></tr>'}`
     + (matches ? `<tr><td>1試合あたりの人</td><td colspan="2">${fmt(hs / matches, 1)} 人</td></tr><tr><td>席のうちCPUの割合</td><td colspan="2">${fmt((bs / Math.max(1, hs + bs)) * 100)}%</td></tr>` : '');
 
+  // where visits came from (?s= tags), A/B pairs (t1a / t1b) sit next to each other
+  const pct = (a, b) => (b ? `${fmt((a / b) * 100)}%` : '–');
+  const src = data.sources || [];
+  $('sources').innerHTML = `<tr><th>印</th><th>来た人</th><th>うち はじめて</th><th>試合を遊んだ人</th><th>遊んだ率</th><th>試合数</th><th>最初</th><th>最後</th></tr>`
+    + (src.map((r) => `<tr><td><b>${r.src.replace(/[<>&"]/g, '')}</b></td><td>${fmt(r.visits)}</td><td>${fmt(r.fresh)}</td><td>${fmt(r.players)}</td><td>${pct(r.players, r.visits)}</td><td>${fmt(r.matches)}</td><td>${md(r.first)}</td><td>${md(r.last)}</td></tr>`).join('')
+      || '<tr><td colspan="8" class="empty">まだ印つきのリンクから来た人はいません</td></tr>');
+
   $('daily').innerHTML = `<tr><th>日付</th><th>開いた人</th><th>遊んだ人</th><th>はじめて遊んだ</th><th>初回起動</th><th>試合</th><th>プレイ時間</th><th>同時ピーク</th><th>ミッション達成</th><th>称号獲得</th></tr>`
     + [...rows].reverse().map((r) => `<tr><td>${r.day}</td><td>${fmt(r.opened)}</td><td>${fmt(r.played)}</td><td>${fmt(r.newPlayers)}</td><td>${fmt(r.newProfiles)}</td><td>${fmt(r.matches)}</td><td>${dur(r.minutes)}</td><td>${fmt(r.peak)}</td><td>${fmt(r.missions)}</td><td>${fmt(r.titles)}</td></tr>`).join('');
 }
