@@ -119,7 +119,9 @@ const EN = {
   // ---------------------------------------------------------------- tutorial (shared/tutorial.js, lobby card, reward)
   'カデットミント': 'Cadet mint', 'ツインブースター': 'Twin boosters', '訓練修了': 'Graduate', 'チュートリアルをクリアで解放': 'Unlocked by finishing the tutorial',
   'チュートリアル': 'Tutorial', 'はじめての方へ': 'New here?',
-  'あとで': 'Later', '中断': 'Quit', '約2分のチュートリアルで、操作をひととおり覚えよう。': 'Learn all the controls in a 2-minute tutorial.',
+  'あとで': 'Later', '中断': 'Quit',
+  'オート射撃': 'Auto fire', 'オン': 'On', 'オフ': 'Off', 'オンにすると、照準が敵に重なったとき自動で撃ちます。': 'When on, you fire automatically while the crosshair is on an enemy.',
+  'ボタン配置を変える': 'Move the buttons', 'ボタンをドラッグして、押しやすい位置に動かしてください': 'Drag the buttons to where they are easy to press', '初期配置に戻す': 'Reset to default', '完了': 'Done', '約2分のチュートリアルで、操作をひととおり覚えよう。': 'Learn all the controls in a 2-minute tutorial.',
   '🎁 クリア報酬': '🎁 Reward', 'ここでしか手に入らない限定アイテム': 'Exclusive items you can only get here', '🎁 報酬ゲット': '🎁 Reward unlocked', 'あなたの名前': 'Your name',
   'ここに指を置いて、すべらせる': 'Put a finger here and slide', 'ここをなぞって狙う': 'Swipe here to aim', 'チュートリアルを始める': 'Start the tutorial',
   '訓練修了！': 'Training complete!', '限定アイテムを手に入れました': 'You got exclusive items', '装備してクイックマッチへ': 'Equip them and play Quick Match',

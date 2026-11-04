@@ -15,6 +15,7 @@ import { setupProgressUi, titleName, rewardCards } from './progress-ui.js';
 import { DEFAULT_LOOK, ITEMS } from '../shared/progress.js';
 import { TUT_STEPS } from '../shared/tutorial.js';
 import { Sound } from './audio.js';
+import { applyTouchLayout, editTouchLayout } from './touch-layout.js';
 import { t as tr, lang, setLang, onLang, initLang } from './i18n.js';
 
 // ------------------------------------------------------------------ config
@@ -53,6 +54,8 @@ let serverTick = null;            // estimated current server tick (float)
 const pendingEvents = [];
 let camYaw = 0, camPitch = 0.05, camDistNow = CAM_DIST, fovKick = 0;
 const aimPoint = new pc.Vec3();
+let aimTarget = null;   // enemy tank under the crosshair (first thing the aim ray meets), for auto fire
+const AUTO_FIRE_RANGE = 75;   // m: farther than this a shell drops too much to be worth firing on its own
 let acc = 0, seq = 0;
 const local = { t: null, prev: null, alive: false, spawnId: -1, pending: [], offset: new pc.Vec3(), hp: C.maxHp, invuln: false, invulnLeft: 0, respawnIn: 0, sliding: false };
 const localShells = [];
@@ -312,6 +315,14 @@ function wireUi() {
     $('settings-rules').classList.toggle('hidden', publicRoom); $('public-note').classList.toggle('hidden', !publicRoom);
     $('btn-newgame').textContent = $('btn-newgame').dataset.label = tr(publicRoom ? 'ニューゲーム' : 'このルールでニューゲーム'); $('settings').classList.remove('hidden'); };
   $('btn-settings-close').onclick = () => $('settings').classList.add('hidden');
+  const paintAuto = () => document.querySelectorAll('#autofire-row [data-a]').forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.a === '1') === autoFireOn())));
+  document.querySelectorAll('#autofire-row [data-a]').forEach((b) => { b.onclick = () => { store.set('ht-autofire', b.dataset.a); paintAuto(); }; });
+  paintAuto();
+  applyTouchLayout();
+  $('btn-layout').onclick = () => {
+    $('settings').classList.add('hidden');
+    editTouchLayout({ onStart: () => { input.enabled = false; input.reset(); }, onEnd: () => { input.enabled = !!room; } });
+  };
   $('btn-invite').onclick = () => { document.exitPointerLock?.(); showInvite(); };
   $('btn-invite-close').onclick = () => $('invite').classList.add('hidden');
   $('btn-copy').onclick = async () => {
@@ -654,7 +665,9 @@ function tick() {
   let ay = camYaw, ap = 0;
   if (local.t) [ay, ap] = solveAim(local.t, aimPoint);
   const play = phase === 'play' || (practicing());   // free fire after a match once you are ready
-  const inp = { seq: ++seq, mx: r3(mx), mz: r3(mz), ay: r3(ay), ap: r3(ap), j: s.jump, d: s.drift, f: s.fire && play, a: s.side && play, u: s.ult && play };
+  const auto = autoFireOn() && play && autoTargetOk();
+  $('crosshair').classList.toggle('auto', auto);
+  const inp = { seq: ++seq, mx: r3(mx), mz: r3(mz), ay: r3(ay), ap: r3(ap), j: s.jump, d: s.drift, f: (s.fire || auto) && play, a: s.side && play, u: s.ult && play };
   if (!inp.a) delete inp.a;
   if (!inp.u) delete inp.u;
   local.sliding = false;
@@ -682,6 +695,14 @@ function tick() {
 }
 let outBuf = [];
 const r3 = (v) => Math.round(v * 1000) / 1000;
+// auto fire (settings): on by default on touch screens, off with a mouse
+function autoFireOn() { const v = store.get('ht-autofire'); return v === null ? document.body.classList.contains('touch') : v === '1'; }
+function autoTargetOk() {
+  if (!aimTarget || !local.alive || !local.t || !input.enabled) return false;
+  const v = tanks.get(aimTarget);
+  if (!v || !v.visible || v.shield?.enabled || relationOf(aimTarget) !== 'enemy') return false;   // shielded: a shot would be wasted
+  return Math.hypot(v.pos.x - local.t.x, v.pos.z - local.t.z) <= AUTO_FIRE_RANGE;
+}
 
 // your own sidearm / special: instant feedback (the server does the real work)
 function localSide(t, ev, gy) {
@@ -1152,6 +1173,7 @@ function updateCamera(dt) {
 function computeAimPoint() {
   const o = camera.getPosition(), f = camera.forward;
   let best = 160;
+  aimTarget = null;
   for (const [id, v] of tanks) {
     if (id === myId || !v.visible || sameTeam(id)) continue;   // shells pass through teammates
     const cx = v.pos.x - o.x, cy = v.pos.y + C.hitCenterY - o.y, cz = v.pos.z - o.z;
@@ -1160,11 +1182,11 @@ function computeAimPoint() {
     const d2 = cx * cx + cy * cy + cz * cz - tca * tca, r = C.hitRadius * 0.85;
     if (d2 > r * r) continue;
     const hit = tca - Math.sqrt(r * r - d2);
-    if (hit < best && hit > camDistNow) best = hit;
+    if (hit < best && hit > camDistNow) { best = hit; aimTarget = id; }
   }
   for (let d = camDistNow + 1; d < best; d += 0.5) {
     const x = o.x + f.x * d, y = o.y + f.y * d, z = o.z + f.z * d;
-    if (y <= heightAt(world, x, z)) { best = d; break; }
+    if (y <= heightAt(world, x, z)) { best = d; aimTarget = null; break; }   // a wall / the ground comes first
   }
   aimPoint.set(o.x + f.x * best, o.y + f.y * best, o.z + f.z * best);
 }

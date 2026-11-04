@@ -88,8 +88,10 @@ body.touch #hpwrap { bottom: auto; top: 40px; width: min(220px, 30vw); }
 .tbtn { position: absolute; border-radius: 50%; background: rgba(255,255,255,.18); border: 2px solid rgba(255,255,255,.5); color: #fff; font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; text-shadow: 0 1px 2px #000; }
 .tbtn.down { background: rgba(255,181,71,.55); }
 #btn-fire { width: 96px; height: 96px; right: calc(24px + env(safe-area-inset-right)); bottom: 28px; }
-#btn-jump { width: 68px; height: 68px; right: calc(132px + env(safe-area-inset-right)); bottom: 22px; }
-#btn-drift { width: 64px; height: 64px; right: calc(40px + env(safe-area-inset-right)); bottom: 140px; }
+/* JUMP / DRIFT sit at the top right (right index finger) by default; the rest under the right thumb.
+   Each button can be moved in settings (client/touch-layout.js sets left/top inline). */
+#btn-drift { width: 66px; height: 66px; right: calc(22px + env(safe-area-inset-right)); top: 60px; }
+#btn-jump { width: 66px; height: 66px; right: calc(104px + env(safe-area-inset-right)); top: 54px; }
 
 #rotate { display: none; position: fixed; inset: 0; z-index: 50; background: #2b1d12; align-items: center; justify-content: center; font-size: 20px; text-align: center; padding: 24px; }
 @media (orientation: portrait) and (pointer: coarse) { body.playing #rotate { display: flex; } }
@@ -238,8 +240,8 @@ body.touch #abil { display: none; }
 .abtn.ready { border-color: #8fe3ff; box-shadow: 0 0 10px #4cb4ff; }
 #btn-ult { background: conic-gradient(rgba(255,181,71,.75) calc(var(--cd) * 360deg), rgba(0,0,0,.35) 0); }
 #btn-ult.ready { border-color: #ffe08a; animation: ultpulse .8s ease-in-out infinite alternate; background: rgba(255,170,60,.6); }
-#btn-side { width: 58px; height: 58px; right: calc(124px + env(safe-area-inset-right)); bottom: 106px; }
-#btn-ult { width: 64px; height: 64px; right: calc(206px + env(safe-area-inset-right)); bottom: 70px; }
+#btn-side { width: 60px; height: 60px; right: calc(136px + env(safe-area-inset-right)); bottom: 24px; }
+#btn-ult { width: 64px; height: 64px; right: calc(128px + env(safe-area-inset-right)); bottom: 122px; }
 
 /* loadout picker */
 .loadout { font-size: 13px; }
@@ -513,3 +515,16 @@ body.tutorial #board, body.tutorial #timer, body.tutorial #btn-invite, body.tuto
 @keyframes tutfinger { 0%, 100% { transform: translate(-50%, -40%); } 50% { transform: translate(-10%, -60%); } }
 @keyframes tutswipe { 0%, 100% { transform: translate(-90%, -40%); } 50% { transform: translate(-10%, -40%); } }
 body:not(.touch) .tut-hint { display: none !important; }
+
+/* auto fire (settings) + touch button layout editor */
+#autofire-row button[aria-pressed="true"] { background: #fff; }
+body:not(.touch) .touch-only { display: none !important; }
+#crosshair.auto { filter: drop-shadow(0 0 4px #ff6b4a); }
+#layout-bar { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 60; background: rgba(32, 20, 12, .92); border: 2px solid rgba(255,181,71,.7); border-radius: 14px; padding: 10px 14px; text-align: center; width: min(420px, calc(100vw - 32px)); }
+#layout-bar p { margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+#layout-bar .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#layout-bar button { padding: 8px 14px; }
+body.layout-edit #touch-layer { display: block !important; z-index: 55; background: rgba(0,0,0,.35); }
+body.layout-edit .tbtn { outline: 2px dashed rgba(255,214,140,.95); outline-offset: 3px; cursor: grab; touch-action: none; }
+body.layout-edit .tbtn.dragging { background: rgba(255,181,71,.55); cursor: grabbing; }
+body.layout-edit #stick-base { display: none !important; }

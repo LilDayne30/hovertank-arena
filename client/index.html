@@ -28,6 +28,12 @@
     <div id="btn-ult" class="tbtn abtn"><b class="ic">⚡</b><small>SP</small></div>
   </div>
 
+  <!-- touch button layout editor (from settings) -->
+  <div id="layout-bar" class="hidden" role="dialog" aria-labelledby="layout-hint">
+    <p id="layout-hint">ボタンをドラッグして、押しやすい位置に動かしてください</p>
+    <div class="row"><button id="btn-layout-reset" type="button" class="ghost">初期配置に戻す</button><button id="btn-layout-cancel" type="button" class="ghost">やめる</button><button id="btn-layout-done" type="button">完了</button></div>
+  </div>
+
   <!-- HUD -->
   <div id="hud" class="hidden">
     <div id="board"></div>
@@ -174,6 +180,9 @@
       画質 <button data-q="low" type="button">低</button><button data-q="mid" type="button">中</button><button data-q="high" type="button">高</button>
     </div>
     <label class="row">感度 <input id="sens" type="range" min="0.4" max="2.0" step="0.1" value="1" /></label>
+    <div class="row" id="autofire-row"><span>オート射撃</span><button data-a="1" type="button">オン</button><button data-a="0" type="button">オフ</button></div>
+    <p class="note">オンにすると、照準が敵に重なったとき自動で撃ちます。</p>
+    <div class="row touch-only"><button id="btn-layout" type="button">ボタン配置を変える</button></div>
     <label class="row">BGM <input id="vol-bgm" type="range" min="0" max="1" step="0.05" value="0.55" /></label>
     <label class="row">効果音 <input id="vol-sfx" type="range" min="0" max="1" step="0.05" value="0.9" /></label>
     <div class="sec-h">装備</div>
