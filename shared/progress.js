@@ -16,7 +16,8 @@ export function levelOf(xp) {
 export const totalForLevel = (L) => CUM[Math.max(1, Math.min(MAX_LEVEL, L))];
 
 // ------------------------------------------------------------------ cosmetic slots & items
-// unlock: { lv: n } from a level reward, { ach: id } from a long-term mission, or {} = from the start
+// unlock: { lv: n } from a level reward, { ach: id } from a long-term mission (or 'tutorial': finishing the
+// tutorial, see shared/tutorial.js), or {} = from the start
 export const SLOTS = [
   { k: 'paint', name: '塗装' }, { k: 'pattern', name: '柄' }, { k: 'turret', name: '砲塔' },
   { k: 'rear', name: 'リアパーツ' }, { k: 'side', name: 'サイド／フロント' }, { k: 'glow', name: 'ホバーの光' },
@@ -41,6 +42,7 @@ export const ITEMS = [
   I('paint', 'gold', 'ゴールド', { lv: 50 }, { color: [0.95, 0.72, 0.22] }),
   I('paint', 'crimson', 'クリムゾン', { ach: 'wins100' }, { color: [0.55, 0.05, 0.12] }),
   I('paint', 'sakura', 'サクラ', { ach: 'daily30' }, { color: [0.98, 0.62, 0.72] }),
+  I('paint', 'cadet', 'カデットミント', { ach: 'tutorial' }, { color: [0.24, 0.8, 0.66] }),
 
   I('pattern', 'none', 'なし'),
   I('pattern', 'stripe', 'レーシングストライプ', { lv: 5 }),
@@ -67,6 +69,7 @@ export const ITEMS = [
   I('rear', 'jet', 'ジェットウイング', { lv: 50 }),
   I('rear', 'antenna', 'フラッグアンテナ', { ach: 'wins10' }),
   I('rear', 'exhaust', 'ツインマフラー', { ach: 'orange300' }),
+  I('rear', 'booster', 'ツインブースター', { ach: 'tutorial' }),
 
   I('side', 'none', 'なし'),
   I('side', 'skirt', 'サイドスカート', { lv: 20 }),
@@ -118,6 +121,7 @@ export const ITEMS = [
   I('title', 'lv30', 'ベテラン', { lv: 30 }),
   I('title', 'lv40', 'エース', { lv: 40 }),
   I('title', 'lv50', 'ホバーマスター', { lv: 50 }),
+  I('title', 'cadet', '訓練修了', { ach: 'tutorial' }),
   // the rest of the titles come from long-term missions (added below from ACHIEVEMENTS)
 ];
 export const DEFAULT_LOOK = Object.fromEntries(SLOTS.map((s) => [s.k, ITEMS.find((i) => i.slot === s.k).id]));

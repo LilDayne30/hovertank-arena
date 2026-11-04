@@ -46,6 +46,7 @@ function render() {
     tile('今日 遊んだ人', fmt(t.played), delta(t.played, y.played)),
     tile('今日 はじめて遊んだ人', fmt(t.newPlayers), delta(t.newPlayers, y.newPlayers)),
     tile('今日の試合数', fmt(t.matches), delta(t.matches, y.matches)),
+    tile('今日 チュートリアル完了', fmt(t.tutDone || 0), `開始 ${fmt(t.tutStart || 0)}人`),
     tile('今日のプレイ時間', dur(t.minutes), `昨日 ${dur(y.minutes || 0)}`),
     tile('今日の同時接続ピーク', fmt(t.peak), `昨日 ${fmt(y.peak)}`),
   ].join('');
@@ -77,8 +78,8 @@ function render() {
     + (src.map((r) => `<tr><td><b>${r.src.replace(/[<>&"]/g, '')}</b></td><td>${fmt(r.visits)}</td><td>${fmt(r.fresh)}</td><td>${fmt(r.players)}</td><td>${pct(r.players, r.visits)}</td><td>${fmt(r.matches)}</td><td>${md(r.first)}</td><td>${md(r.last)}</td></tr>`).join('')
       || '<tr><td colspan="8" class="empty">まだ印つきのリンクから来た人はいません</td></tr>');
 
-  $('daily').innerHTML = `<tr><th>日付</th><th>開いた人</th><th>遊んだ人</th><th>はじめて遊んだ</th><th>初回起動</th><th>試合</th><th>プレイ時間</th><th>同時ピーク</th><th>ミッション達成</th><th>称号獲得</th></tr>`
-    + [...rows].reverse().map((r) => `<tr><td>${r.day}</td><td>${fmt(r.opened)}</td><td>${fmt(r.played)}</td><td>${fmt(r.newPlayers)}</td><td>${fmt(r.newProfiles)}</td><td>${fmt(r.matches)}</td><td>${dur(r.minutes)}</td><td>${fmt(r.peak)}</td><td>${fmt(r.missions)}</td><td>${fmt(r.titles)}</td></tr>`).join('');
+  $('daily').innerHTML = `<tr><th>日付</th><th>開いた人</th><th>遊んだ人</th><th>はじめて遊んだ</th><th>初回起動</th><th>試合</th><th>プレイ時間</th><th>同時ピーク</th><th>ミッション達成</th><th>称号獲得</th><th>チュートリアル開始</th><th>完了</th></tr>`
+    + [...rows].reverse().map((r) => `<tr><td>${r.day}</td><td>${fmt(r.opened)}</td><td>${fmt(r.played)}</td><td>${fmt(r.newPlayers)}</td><td>${fmt(r.newProfiles)}</td><td>${fmt(r.matches)}</td><td>${dur(r.minutes)}</td><td>${fmt(r.peak)}</td><td>${fmt(r.missions)}</td><td>${fmt(r.titles)}</td><td>${fmt(r.tutStart || 0)}</td><td>${fmt(r.tutDone || 0)}</td></tr>`).join('');
 }
 
 // ------------------------------------------------------------------ charts (plain SVG)

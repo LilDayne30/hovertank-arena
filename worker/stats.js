@@ -1,7 +1,7 @@
 // Play statistics for the owner's dashboard (/admin.html). One global Durable Object.
 // Only anonymous profile keys (already SHA-256 hashes of the device token) are stored: no names,
 // no IP addresses. Days are Japan time.
-//   events (POST /event): open {pkey, src?, fresh?} | new {pkey} | match {...} | room {roomId, humans, public}
+//   events (POST /event): open {pkey, src?, fresh?} | new {pkey} | match {...} | room {roomId, humans, public} | tut {s: start|done, pkey}
 //   src = the ?s= tag of the link a visit came in through (an X post): per tag we count the devices that
 //   arrived, how many of them were first launches, and how many then played a match within 7 days.
 //   GET /summary?days=N -> daily rows + level histogram + live numbers
@@ -67,6 +67,10 @@ export class GameStats extends DurableObject {
       if (e.type === 'open' && e.pkey) {
         if (await this.once(`o:${today}:${e.pkey}`)) d.opened++;
         if (e.src && SRC_RE.test(e.src)) await this.arrive(e.src, e.pkey, !!e.fresh, today, now);
+      } else if (e.type === 'tut' && e.pkey && (e.s === 'start' || e.s === 'done')) {
+        // tutorial started / finished (once per device per day)
+        const f = e.s === 'start' ? 'tutStart' : 'tutDone';
+        if (await this.once(`${e.s === 'start' ? 'ts' : 'td'}:${today}:${e.pkey}`)) d[f] = (d[f] || 0) + 1;
       } else if (e.type === 'new') {
         d.newProfiles++;
       } else if (e.type === 'match') {
@@ -120,7 +124,7 @@ export class GameStats extends DurableObject {
   // daily clean-up of per-day unique keys older than KEEP_DAYS
   async alarm() {
     const cutoff = dayKey(Date.now() - KEEP_DAYS * 86400e3);
-    for (const prefix of ['o:', 'pl:']) {
+    for (const prefix of ['o:', 'pl:', 'ts:', 'td:']) {
       const old = [];
       for (const [k] of await this.ctx.storage.list({ prefix })) { if (k.slice(prefix.length, prefix.length + 10) < cutoff) old.push(k); if (old.length >= 128) break; }
       if (old.length) await this.ctx.storage.delete(old);

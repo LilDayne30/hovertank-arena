@@ -11,6 +11,7 @@ const looks = [
 ];
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  { const nc = b.newContext.bind(b); b.newContext = async (o) => { const c = await nc(o); await c.addInitScript(() => { try { localStorage.setItem('ht-tut-later', '1'); } catch {} }); return c; }; }   // skip the first-visit tutorial popup
   const p = await (await b.newContext({ locale: 'ja-JP', viewport: { width: 640, height: 400 } })).newPage({ locale: 'ja-JP' });
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   await p.goto(process.env.URL + '/?debug'); await p.waitForFunction(() => window.__ht && window.__ht.readyAt, null, { timeout: 30000 });

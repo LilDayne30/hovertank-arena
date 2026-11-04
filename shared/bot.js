@@ -41,7 +41,7 @@ export function randomLook(level) {
   const have = level ? owned(level, {}) : null;
   for (const s of SLOTS) {
     if (s.k === 'title') continue;
-    const opts = ITEMS.filter((i) => i.slot === s.k && (!have || have.has(i.key)));
+    const opts = ITEMS.filter((i) => i.slot === s.k && (!have || have.has(i.key)) && i.unlock.ach !== 'tutorial');   // tutorial rewards stay exclusive
     if (opts.length && Math.random() < 0.6) look[s.k] = pick(opts).id;
   }
   if (!level || Math.random() < 0.5) look.paint = 'auto';
@@ -66,6 +66,33 @@ function freeDir(w, x, z, a, dist) {
     if (heightAt(w, px, pz) - h0 > C.stepMax * 0.8) return false;
   }
   return true;
+}
+
+// tutorial target: drifts slowly back and forth around its spot, faces the player, never shoots
+export class DummyBrain {
+  constructor(home) { this.level = 'dummy'; this.home = home; this.seq = 0; this.time = Math.random() * 6; }
+  setSkill() {}
+  think(me, game) {
+    this.time += DT;
+    const inp = { seq: ++this.seq, mx: 0, mz: 0, ay: 0, ap: 0, j: false, d: false, f: false };
+    const t = me.tank;
+    if (!t || !me.alive) return inp;
+    const foe = [...game.players.values()].find((o) => !o.bot && o.alive && o.tank);
+    // base spot: home, or (when the player has driven far away) a spot 18 m from the player on the way home
+    let bx = this.home.x, bz = this.home.z;
+    if (foe) {
+      const hx = this.home.x - foe.tank.x, hz = this.home.z - foe.tank.z, hd = Math.hypot(hx, hz) || 1;
+      if (hd > 26) { bx = foe.tank.x + (hx / hd) * 18; bz = foe.tank.z + (hz / hd) * 18; }
+    }
+    const fx = foe ? foe.tank.x - bx : 1, fz = foe ? foe.tank.z - bz : 0, fl = Math.hypot(fx, fz) || 1;
+    // goal: a point that slides along the line across the player's view
+    const off = Math.sin(this.time * 0.45) * 4.5;
+    const gx = bx + (-fz / fl) * off - t.x, gz = bz + (fx / fl) * off - t.z, gd = Math.hypot(gx, gz);
+    const mag = Math.min(gd > 10 ? 0.8 : 0.45, gd / 4);
+    if (gd > 0.3) { inp.mx = (gx / gd) * mag; inp.mz = (gz / gd) * mag; }
+    if (foe) inp.ay = Math.atan2(-(foe.tank.x - t.x), -(foe.tank.z - t.z));
+    return inp;
+  }
 }
 
 export class BotBrain {

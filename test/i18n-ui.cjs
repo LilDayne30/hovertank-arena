@@ -10,7 +10,7 @@ const JA = /[぀-ヿ一-鿿]/;
   const c = await b.newContext({ viewport: { width: 1280, height: 720 }, locale: 'ja-JP' });
   const p = await c.newPage();
   p.on('pageerror', (e) => errors.push(e.message));
-  await p.addInitScript(() => { try { localStorage.setItem('ht-quality', 'low'); } catch {} });
+  await p.addInitScript(() => { try { localStorage.setItem('ht-quality', 'low'); localStorage.setItem('ht-tut-later', '1'); } catch {} });
   await p.goto(process.env.URL + '/?debug', { waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => document.getElementById('loading')?.classList.contains('hidden') && !document.getElementById('prof-bar').classList.contains('hidden'));
   ok((await p.textContent('#btn-lang')).includes('English'), 'Japanese browser starts in Japanese; button offers English');

@@ -51,6 +51,15 @@
     <div id="damage"></div>
     <div id="flash"></div>
     <div id="tags"></div>
+    <div id="tut-hint-move" class="tut-hint hidden" aria-hidden="true"><i></i><span>ここに指を置いて、すべらせる</span></div>
+    <div id="tut-hint-aim" class="tut-hint hidden" aria-hidden="true"><i></i><span>ここをなぞって狙う</span></div>
+    <!-- tutorial room: the current step (shared/tutorial.js), checked by the server -->
+    <div id="tut-panel" class="hidden" role="status" aria-live="polite">
+      <div class="tp-top"><span id="tut-no"></span><b id="tut-title"></b><button id="btn-tut-quit" type="button">中断</button></div>
+      <p id="tut-text"></p>
+      <div class="tp-bar"><i id="tut-fill"></i></div>
+      <div id="tut-dots" aria-hidden="true"></div>
+    </div>
     <div id="pc-help">WASD 移動 ／ マウス 照準 ／ 左クリック 射撃 ／ Space ジャンプ ／ Shift・右クリック ドリフト（溜めて離すと加速） ／ E サイドアーム ／ Q 必殺技 ／ Esc マウス解放</div>
   </div>
 
@@ -72,6 +81,7 @@
     <nav class="lb-left" aria-label="メニュー">
       <button id="btn-garage" type="button" class="side-btn"><b aria-hidden="true">🎨</b><span>ガレージ</span></button>
       <button id="btn-missions" type="button" class="side-btn"><b aria-hidden="true">🎯</b><span>ミッション</span><i id="pb-badge" class="badge"></i></button>
+      <button id="btn-tutorial" type="button" class="side-btn tight"><b aria-hidden="true">🎓</b><span>チュートリアル</span><i id="tut-badge" class="badge hidden">🎁</i></button>
     </nav>
     <div class="lb-right" aria-label="装備（タップで変更）">
       <button id="btn-loadout" type="button" class="ab-pick" data-slot="side" aria-label="サイドアームを変える"></button>
@@ -176,6 +186,21 @@
     <div class="row"><button id="btn-fullscreen" type="button">全画面</button><button id="btn-leave" type="button">退出</button><button id="btn-settings-close" type="button">閉じる</button></div>
   </div>
 
+  <!-- first visit: the tutorial and what finishing it gives (hidden for good after "あとで") -->
+  <div id="tut-pop" class="panel pop-modal scrollable hidden" role="dialog" aria-labelledby="tut-pop-h">
+    <h2 id="tut-pop-h">はじめての方へ</h2>
+    <p class="pop-sub">約2分のチュートリアルで、操作をひととおり覚えよう。</p>
+    <div class="rw-head"><span class="rw-ribbon">🎁 クリア報酬</span><small>ここでしか手に入らない限定アイテム</small></div>
+    <div class="rw-cards" id="tut-pop-rew"></div>
+    <div class="pop-row"><button id="btn-tut-later" type="button" class="ghost">あとで</button><button id="btn-tut-start" type="button" class="big go">チュートリアルを始める</button></div>
+  </div>
+  <!-- tutorial finished: the reward -->
+  <div id="tut-done" class="panel pop-modal scrollable hidden" role="dialog" aria-labelledby="tut-done-h">
+    <h2 id="tut-done-h">訓練修了！</h2>
+    <div class="rw-head"><span class="rw-ribbon">🎁 報酬ゲット</span><small id="tut-done-p">限定アイテムを手に入れました</small></div>
+    <div class="rw-cards" id="tut-done-rew"></div>
+    <div class="pop-row"><button id="btn-tut-lobby" type="button" class="ghost">ロビーへ戻る</button><button id="btn-tut-equip" type="button" class="big go">装備してクイックマッチへ</button></div>
+  </div>
   <div id="result" class="panel scrollable hidden"><h2 id="result-title">試合終了</h2><p id="result-teams"></p><ol id="result-list"></ol><div id="result-xp"></div>
     <p id="result-next" class="note"></p>
     <div id="result-rules-box" class="hidden"><div id="result-rules" class="rules"></div><div class="row"><button id="btn-res-rules-ok" type="button">このルールにする</button><button id="btn-res-rules-cancel" type="button" class="ghost">やめる</button></div></div>

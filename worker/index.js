@@ -28,6 +28,14 @@ export default {
       return json({ id });
     }
 
+    // tutorial: a private room of one's own with two target tanks (shared/tutorial.js)
+    if (url.pathname === '/api/tutorial' && request.method === 'POST') {
+      const id = roomCode();
+      const stub = env.ROOMS.get(env.ROOMS.idFromName(id));
+      await stub.fetch('https://room/init', { method: 'POST', headers: { 'x-room-id': id, 'content-type': 'application/json' }, body: JSON.stringify({ tutorial: true }) });
+      return json({ id });
+    }
+
     // passphrase: the same phrase always leads to the same private room. If nobody is in it, it is
     // (re)made with the rules of the person arriving; otherwise they join with the room's rules.
     if (url.pathname === '/api/phrase' && request.method === 'POST') {

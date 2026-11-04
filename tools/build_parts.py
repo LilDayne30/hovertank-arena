@@ -332,7 +332,28 @@ def r_exhaust():
     p.mirror_x(pipe)
     return p.object('exhaust')
 
-for n, fn in [('spoiler', r_spoiler), ('fins', r_fins), ('jet', r_jet), ('antenna', r_antenna), ('exhaust', r_exhaust)]:
+def r_booster():
+    # tutorial reward: two rocket boosters on pylons over the rear deck, glowing nozzles, swept fins
+    p = Part()
+    BZ_, R = 1.5, 0.25
+    def pod(s):
+        x = s * 0.78
+        p.cyl((x, BZ_), 'y', R, -2.3, -1.25, 'Main', seg=10)                     # body
+        p.cyl((x, BZ_), 'y', R, -1.25, -0.86, 'Main_Light', seg=10, r1=0.07)     # nose cone
+        p.cyl((x, BZ_), 'y', R + 0.025, -1.95, -1.82, 'Main_Details', seg=10)    # band
+        p.cyl((x, BZ_), 'y', 0.2, -2.3, -2.5, 'Main_Details', seg=10, r1=0.27)   # nozzle bell
+        p.cyl((x, BZ_), 'y', 0.18, -2.52, -2.5, 'Glow', seg=10)                  # flame core
+        p.box(x - 0.09, x + 0.09, -2.0, -1.35, 1.0, BZ_ - 0.12, 'Main_Details', ch=0.02)   # pylon to the deck
+        # swept fin on the outer side and one on top
+        p.hull([(x + s * R * 0.8, y, z) for y, z in [(-2.32, BZ_), (-1.85, BZ_)]] + [(x + s * (R + 0.42), y, z) for y, z in [(-2.42, BZ_ + 0.02), (-2.18, BZ_ + 0.02)]]
+               + [(x + s * R * 0.8, y, BZ_ + 0.05) for y in (-2.32, -1.85)], 'Main_Dark')
+        p.hull([(x + u, y, z) for u in (-0.025, 0.025) for y, z in [(-2.3, BZ_ + R * 0.8), (-1.8, BZ_ + R * 0.8), (-2.42, BZ_ + R + 0.36), (-2.2, BZ_ + R + 0.36)]], 'Main_Dark')
+        p.hull([(x + u, y, z) for u in (-0.03, 0.03) for y, z in [(-2.4, BZ_ + R + 0.3), (-2.22, BZ_ + R + 0.3), (-2.42, BZ_ + R + 0.37), (-2.21, BZ_ + R + 0.37)]], 'Glow')
+    p.mirror_x(pod)
+    p.box(-0.6, 0.6, -1.8, -1.62, 1.12, 1.3, 'Main_Dark', ch=0.02)   # cross brace (under the barrel's path)
+    return p.object('booster')
+
+for n, fn in [('spoiler', r_spoiler), ('fins', r_fins), ('jet', r_jet), ('antenna', r_antenna), ('exhaust', r_exhaust), ('booster', r_booster)]:
     group(f'R_{n}', fn(), (0, 0, 0))
 
 # ------------------------------------------------------------------ side / front parts

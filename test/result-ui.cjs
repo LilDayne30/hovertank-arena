@@ -10,7 +10,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
   const mk = async (name) => {
     const c = await b.newContext({ viewport: { width: 800, height: 450 }, locale: 'ja-JP' });
     const p = await c.newPage();
-    await p.addInitScript(() => { try { localStorage.setItem('ht-quality', 'low'); } catch {} });
+    await p.addInitScript(() => { try { localStorage.setItem('ht-quality', 'low'); localStorage.setItem('ht-tut-later', '1'); } catch {} });
     p.on('pageerror', (e) => errors.push(`${name}: ${e.message}`));
     await p.goto(URL + '/?debug', { waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => document.getElementById('loading')?.classList.contains('hidden'));

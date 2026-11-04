@@ -32,6 +32,7 @@ export class BattleRoom extends DurableObject {
       broadcast: (type, data) => this.broadcast(type, data),
       matchEnd: (summary) => this.awardMatch(summary),
       phase: () => this.report(),   // quick match: tell the matchmaker when the room opens / closes
+      tutorialDone: (p) => this.awardTutorial(p),
     }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
   }
 
@@ -45,16 +46,18 @@ export class BattleRoom extends DurableObject {
       this.public = !!(await this.ctx.storage.get('public'));
       this.phrase = (await this.ctx.storage.get('phrase')) || null;
       this.game.autoFill = this.public;   // quick-match rooms: empty seats are filled with CPU players
+      this.game.tutorial = !!(await this.ctx.storage.get('tutorial'));
     }
 
     if (url.pathname === '/init') {
-      let rules = null, isPublic = false;
-      try { const b = await request.json(); rules = b?.rules ?? null; isPublic = !!b?.public; } catch { /* default rules */ }
-      rules = cleanRules(rules);
-      this.public = isPublic;
-      this.game.autoFill = isPublic;
+      let rules = null, isPublic = false, tutorial = false;
+      try { const b = await request.json(); rules = b?.rules ?? null; isPublic = !!b?.public; tutorial = !!b?.tutorial; } catch { /* default rules */ }
+      rules = cleanRules(tutorial ? { mode: 'ffa', goal: 'time', bots: 0 } : rules);
+      this.public = isPublic && !tutorial;
+      this.game.autoFill = this.public;
+      this.game.tutorial = tutorial;
       this.game.setRules(rules);
-      await this.ctx.storage.put({ created: true, rules, public: isPublic });
+      await this.ctx.storage.put({ created: true, rules, public: this.public, tutorial });
       this.created = true;
       await this.ctx.storage.setAlarm(Date.now() + CLEANUP_MS);
       return json({ ok: true });
@@ -112,6 +115,7 @@ export class BattleRoom extends DurableObject {
       return this.reject(ws, 'expired', 4004, '再接続の期限が切れました');
     } else {
       if (this.game.isFull()) return this.reject(ws, 'full', 4001, 'この部屋は満室です');
+      if (this.game.tutorial && this.game.humans >= 1) return this.reject(ws, 'full', 4001, 'この部屋は満室です');   // a tutorial is for one person
       // joins from quick match only while the room is gathering players or between matches
       // (an invite link still lets a friend in at any time)
       if (url.searchParams.get('qm') && this.game.humans > 0 && !this.game.open) return this.reject(ws, 'full', 4001, 'この部屋は試合中です');
@@ -162,7 +166,21 @@ export class BattleRoom extends DurableObject {
       if (!key) { if (typeof token !== 'string' || !TOKEN_RE.test(token)) return; key = await profileKey(token); }
       const b = await (await profileStub(this.env, key).fetch('https://profile/brief')).json();
       if (this.game.players.has(id)) this.game.setProfile(id, { key, lv: b.lv, look: b.look });
+      if (this.game.tutorial && !this.tutStarted?.has(key)) { (this.tutStarted ??= new Set()).add(key); statEvent(this.env, this.ctx, { type: 'tut', s: 'start', pkey: key }); }
     } catch (e) { console.warn('profile', e?.message); }
+  }
+
+  // tutorial finished (every step checked by the game): unlock the reward items on the player's profile
+  async awardTutorial(p) {
+    const key = p.prof?.key;
+    let res = { first: false, unlocked: [] };
+    if (key && this.env.PROFILES) {
+      try {
+        res = await (await profileStub(this.env, key).fetch('https://profile/tutorial', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json();
+        statEvent(this.env, this.ctx, { type: 'tut', s: 'done', pkey: key });
+      } catch (e) { console.warn('tutorial', e?.message); res = { error: true, unlocked: [] }; }
+    } else res.error = !key;
+    this.sendTo(p.id, 'tutdone', res);
   }
 
   // match over: report every player's stats to their profile and send them what they earned

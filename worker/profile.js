@@ -21,6 +21,8 @@ export function newToken() {
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+// the tutorial rewards (listed even for an admin profile, which already owns everything)
+const ITEM_TUT = [...ITEM.values()].filter((i) => i.unlock.ach === 'tutorial').map((i) => i.key);
 const emptyStats = () => Object.fromEntries([...STAT_KEYS, 'dailyDone'].map((k) => [k, 0]));
 
 export class PlayerProfile extends DurableObject {
@@ -48,6 +50,7 @@ export class PlayerProfile extends DurableObject {
     return {
       level: lv.level, xp: d.xp, into: lv.into, need: lv.need,
       look: cleanLook(d.look, this.ownedSet()), owned: [...this.ownedSet()], admin: !!d.admin || undefined,
+      tut: !!d.ach.tutorial,
       stats: d.stats,
       ach: ACHIEVEMENTS.map((a) => ({ id: a.id, done: !!d.ach[a.id], prog: Math.min(a.target, d.stats[a.key] || 0) })),
       daily: { day: dl.day, resetAt: nextResetAt(), ids: dl.ids, prog: dl.prog, done: dl.done, rerolled: dl.rerolled, bonus: dl.bonus },
@@ -79,6 +82,14 @@ export class PlayerProfile extends DurableObject {
       return json(this.view());
     }
     if (url.pathname === '/award') return json(await this.award(body));
+    // the tutorial room reports that this player finished every step (worker/room.js): unlock the rewards once
+    if (url.pathname === '/tutorial') {
+      const before = this.ownedSet(), first = !this.d.ach.tutorial;
+      if (first) this.d.ach.tutorial = Date.now();
+      const unlocked = [...this.ownedSet()].filter((k) => !before.has(k));
+      await this.save();
+      return json({ first, unlocked: first ? unlocked.length ? unlocked : ITEM_TUT : [], view: this.view() });
+    }
     if (url.pathname === '/admin') {   // only reachable through /api/admin/grant (admin key checked there)
       this.d.admin = !!body.on;
       if (!this.d.admin) this.d.look = cleanLook(this.d.look, this.ownedSet());

@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const URL = process.env.URL;
 (async () => {
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  { const nc = b.newContext.bind(b); b.newContext = async (o) => { const c = await nc(o); await c.addInitScript(() => { try { localStorage.setItem('ht-tut-later', '1'); } catch {} }); return c; }; }   // skip the first-visit tutorial popup
   for (const profile of [{ name: 'this test machine', net: null }]) {
     const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 1280, height: 720 } });
     const p = await ctx.newPage({ locale: 'ja-JP' });

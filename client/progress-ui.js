@@ -16,6 +16,7 @@ export const titleName = (id) => (id && id !== 'none' ? tr(item('title', id)?.na
 
 export function unlockText(it) {
   if (it.unlock.lv) return tr('Lv.{n}で解放', { n: it.unlock.lv });
+  if (it.unlock.ach === 'tutorial') return tr('チュートリアルをクリアで解放');
   if (it.unlock.ach) { const a = achOf(it.unlock.ach); return tr('「{t}」（{x}）で解放', { t: tr(a.title), x: tr(a.text) }); }
   return '';
 }
@@ -26,6 +27,24 @@ function swatch(it) {
   if (it.slot === 'emblem') return it.id === 'none' ? '<i class="sw none"></i>' : emblemSvg(it.id, 18);
   if (it.slot === 'frame') return `<i class="sw frame-${it.id}"></i>`;
   return '';
+}
+
+// chips for a set of items (tutorial rewards): swatch or icon, name, slot
+const SLOT_ICON = { rear: '🚀', side: '🛡', turret: '🎯', title: '🏷', pattern: '▦', boom: '💥' };
+export function rewardChips(keys) {
+  return keys.map((k) => item(...k.split(':'))).filter(Boolean)
+    .map((it) => `<span class="rw">${swatch(it) || `<i class="ic">${SLOT_ICON[it.slot] || '★'}</i>`}${esc(it.slot === 'title' ? (lang === 'en' ? `"${nm(it)}"` : `「${nm(it)}」`) : nm(it))}<small>${esc(slotName(it.slot))}</small></span>`).join('');
+}
+
+// picture cards for the tutorial rewards: a render of the item on a tank, or the name tag for a title
+const REWARD_PIC = { 'paint:cadet': './assets/ui/tut-paint.jpg', 'rear:booster': './assets/ui/tut-booster.jpg' };
+export function rewardCards(keys) {
+  return keys.map((k) => item(...k.split(':'))).filter(Boolean).map((it) => {
+    const pic = REWARD_PIC[it.key]
+      ? `<img src="${REWARD_PIC[it.key]}" alt="" loading="lazy" width="400" height="279">`
+      : it.slot === 'title' ? `<span class="tagdemo"><span class="nm">${esc(tr('あなたの名前'))}</span><span class="tt">${esc(nm(it))}</span></span>` : swatch(it);
+    return `<div class="rw-card"><div class="pic ${it.slot === 'title' ? 'ttl-pic' : ''}">${pic}</div><b>${esc(nm(it))}</b><small>${esc(slotName(it.slot))}</small></div>`;
+  }).join('');
 }
 
 export function setupProgressUi({ profile, onPreview, onSaved, inRoom }) {

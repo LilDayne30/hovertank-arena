@@ -5,6 +5,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
 (async () => {
   const URL = process.env.URL, KEY = 'local-test-key';
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  { const nc = b.newContext.bind(b); b.newContext = async (o) => { const c = await nc(o); await c.addInitScript(() => { try { localStorage.setItem('ht-tut-later', '1'); } catch {} }); return c; }; }   // skip the first-visit tutorial popup
   const errors = [];
   const tag = `t${Date.now() % 100000}`;
   const open = async (ctx, q) => {

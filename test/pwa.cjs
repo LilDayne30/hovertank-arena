@@ -6,6 +6,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
 (async () => {
   const base = process.env.URL;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  { const nc = b.newContext.bind(b); b.newContext = async (o) => { const c = await nc(o); await c.addInitScript(() => { try { localStorage.setItem('ht-tut-later', '1'); } catch {} }); return c; }; }   // skip the first-visit tutorial popup
   const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 960, height: 540 } });
   const p = await ctx.newPage({ locale: 'ja-JP' });
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));

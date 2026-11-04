@@ -5,7 +5,8 @@ import {
 } from './sim.js';
 import { SIDE, ULT, ULT_MAX, ULT_GAIN, DEFAULT_LOADOUT, cleanLoadout, SIDEARMS, ULTS } from './abilities.js';
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
-import { BotBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel, randomLoadout } from './bot.js';
+import { BotBrain, DummyBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel, randomLoadout } from './bot.js';
+import { TUT_STEPS, TUT_PLAYER, TUT_TARGETS, TUT_TARGET_NAMES } from './tutorial.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -57,6 +58,8 @@ export class Game {
     this.autoFill = !!opts.autoFill;
     this.waitSeconds = opts.waitSeconds ?? QM_WAIT;
     this.botSeq = 0;
+    // tutorial room: two targets that never shoot, no time limit, steps checked here (shared/tutorial.js)
+    this.tutorial = !!opts.tutorial;
   }
 
   // seats in this room: quick-match rooms use the chosen size, invite rooms always 4
@@ -114,6 +117,7 @@ export class Game {
   wantedBots() {
     const h = this.humans;
     if (h === 0) return 0;
+    if (this.tutorial) return TUT_TARGETS.length;
     if (this.autoFill && this.phase === 'wait') return 0;
     if (this.autoFill) return Math.max(0, this.capacity - h);
     return Math.min(this.rules.bots || 0, MAX_PLAYERS - h);
@@ -128,6 +132,13 @@ export class Game {
   addBot(level) {
     const used = new Set([...this.players.values()].map((p) => p.name));
     const id = `cpu${++this.botSeq}`;
+    if (this.tutorial) {
+      const i = TUT_TARGET_NAMES.findIndex((n) => !used.has(n));
+      const home = TUT_TARGETS[Math.max(0, i)];
+      const p = this.addPlayer(id, TUT_TARGET_NAMES[i] || '的', { bot: new DummyBrain(home), loadout: DEFAULT_LOADOUT, tutHome: home });
+      p.prof = { lv: 0, look: { paint: 'yellow', pattern: 'hazard' }, bot: true };   // training-target stripes
+      return p;
+    }
     if (this.autoFill) {
       // quick match: a regular-looking opponent whose strength follows the players' level
       const pool = QM_NAMES.filter((n) => !used.has(n));
@@ -169,7 +180,7 @@ export class Game {
       this.removePlayer(bots[bots.length - 1].id, true); changed = true;
     }
     while (this.botCount < want && this.players.size < this.capacity) { this.addBot(level()); changed = true; }
-    for (const p of this.players.values()) if (p.bot && !this.autoFill && p.bot.level !== this.rules.botLevel) { p.bot = new BotBrain(this.rules.botLevel); changed = true; }
+    for (const p of this.players.values()) if (p.bot && !this.autoFill && !this.tutorial && p.bot.level !== this.rules.botLevel) { p.bot = new BotBrain(this.rules.botLevel); changed = true; }
     if (this.teamMode) {
       const n = [0, 0]; for (const p of this.players.values()) n[p.team]++;
       for (const p of this.players.values()) {
@@ -226,7 +237,7 @@ export class Game {
       kills: 0, deaths: 0, queue: [], lastSeq: 0, lastQueued: 0, credits: 0, dropped: 0,
       connected: true, spawnId: 0, team: 0,
       m: freshStats(), joinedAt: this.time, prof: null, bot: extra.bot || null,
-      loadout: cleanLoadout(extra.loadout || DEFAULT_LOADOUT),
+      loadout: cleanLoadout(extra.loadout || DEFAULT_LOADOUT), tutHome: extra.tutHome,
     };
     // a fresh match starts when the first player arrives in an empty room
     // (quick match: first a short wait so people arriving together end up in the same match)
@@ -264,7 +275,7 @@ export class Game {
 
   welcome(id, extra = {}) {
     const p = this.players.get(id);
-    return { id: p.id, slot: this.colorOf(p), team: p.team, tick: this.tick, phase: this.phase, rules: this.rules, ...extra };
+    return { id: p.id, slot: this.colorOf(p), team: p.team, tick: this.tick, phase: this.phase, rules: this.rules, tut: this.tutorial ? this.tutState(p) : undefined, ...extra };
   }
 
   onInput(id, batch) {
@@ -302,7 +313,7 @@ export class Game {
   resetMatch() {
     this.phase = 'play';
     this.winner = null;
-    this.phaseEnds = this.time + (this.rules.goal === 'kills' ? KILLS_TIME_CAP : this.matchSeconds);
+    this.phaseEnds = this.tutorial ? Infinity : this.time + (this.rules.goal === 'kills' ? KILLS_TIME_CAP : this.matchSeconds);
     this.shells.length = 0;
     this.heal = { active: false, nextAt: this.time + this.healInterval };
     this.matchStart = this.time;
@@ -424,6 +435,7 @@ export class Game {
         const t = p.tank;
         const ev = stepTank(t, inp, w);
         this.abilityEvents(p, ev, events);
+        if (this.tutorial && !p.bot) this.tutTick(p, ev);
         if (this.ultRate > 1) t.ult = Math.min(ULT_MAX, t.ult + ULT_GAIN.perSec * (this.ultRate - 1) * DT);
         if (this.phase === 'play') {
           p.m.moved += Math.hypot(t.vx, t.vz) * DT;
@@ -520,6 +532,7 @@ export class Game {
     p.hp -= dmg;
     const owner = this.players.get(ownerId);
     if (owner && this.phase === 'play') { owner.m.hits++; owner.m.dmg += dmg; if (owner.tank) owner.tank.ult = Math.min(ULT_MAX, owner.tank.ult + ULT_GAIN.hit); }
+    if (this.tutorial && owner && !owner.bot) this.tutCount(owner, 'hit');
     events.push({ t: 'hit', o: ownerId, v: p.id, hp: Math.max(0, p.hp), d: dmg, ...ev });
     if (p.hp <= 0) this.kill(p, ownerId, events, info);
   }
@@ -654,6 +667,7 @@ export class Game {
       }
     }
     events.push({ t: 'kill', k: killerId, v: p.id, x: r2(p.tank.x), y: r2(p.tank.y), z: r2(p.tank.z) });
+    if (this.tutorial && k && !k.bot) this.tutCount(k, 'kill');
   }
 
   spawn(p) {
@@ -661,10 +675,15 @@ export class Game {
     // team mode: own half of the arena, away from enemies; free-for-all: farthest from everyone
     const pool = this.teamMode ? TEAM_SPAWNS[p.team] : w.spawns;
     let best = pool[p.slot % pool.length], bestD = -Infinity;
+    if (this.tutorial) {
+      // fixed places: the player in the corner facing the centre, the targets facing the player
+      const s = p.bot ? (p.tutHome || TUT_TARGETS[0]) : TUT_PLAYER;
+      best = { x: s.x, z: s.z, yaw: p.bot ? Math.atan2(-(TUT_PLAYER.x - s.x), -(TUT_PLAYER.z - s.z)) : TUT_PLAYER.yaw };
+    }
     const live = [...this.players.values()].filter((o) => o !== p && o.alive && o.tank);
     const others = live.filter((o) => !(this.teamMode && o.team === p.team));
     const mates = live.filter((o) => this.teamMode && o.team === p.team);
-    if (others.length || mates.length) {
+    if (!this.tutorial && (others.length || mates.length)) {
       for (const s of pool) {
         let d = others.length ? Math.min(...others.map((o) => Math.hypot(o.tank.x - s.x, o.tank.z - s.z))) : 100;
         if (mates.some((o) => Math.hypot(o.tank.x - s.x, o.tank.z - s.z) < 8)) d -= 1000;   // don't land on a teammate
@@ -679,6 +698,31 @@ export class Game {
     p.invulnUntil = this.time + C.spawnInvuln;
     p.spawnId++;
   }
+
+  // ------------------------------------------------------------------ tutorial
+  tutState(p) { p.tut ??= { step: 0, n: 0, base: p.m.moved }; return { step: p.tut.step, n: p.tut.n, done: p.tut.step >= TUT_STEPS.length }; }
+  tutTick(p, ev) {
+    const st = this.tutState(p), cur = TUT_STEPS[st.step];
+    if (!cur) return;
+    if (cur.id === 'move') { const n = Math.floor(p.m.moved - p.tut.base); if (n !== p.tut.n) { p.tut.n = n; if (n >= cur.need) this.tutNext(p); else if (this.tick % 6 === 0) this.tutSend(p); } }
+    if (cur.id === 'jump' && ev.jumped) this.tutCount(p, 'jump');
+    if (cur.id === 'side' && ev.side) this.tutCount(p, 'side');
+    if (cur.id === 'ult' && ev.ult) this.tutCount(p, 'ult');
+  }
+  tutCount(p, id) {
+    const st = this.tutState(p), cur = TUT_STEPS[st.step];
+    if (!cur || cur.id !== id) return;
+    p.tut.n++;
+    if (p.tut.n >= cur.need) this.tutNext(p); else this.tutSend(p);
+  }
+  tutNext(p) {
+    p.tut.step++; p.tut.n = 0; p.tut.base = p.m.moved;
+    const cur = TUT_STEPS[p.tut.step];
+    if (cur?.id === 'ult' && p.tank) p.tank.ult = ULT_MAX;   // the meter is filled for this step
+    this.tutSend(p);
+    if (!cur) this.io.tutorialDone?.(p);
+  }
+  tutSend(p) { this.io.send?.(p.id, 'tut', this.tutState(p)); }
 
   broadcastSnapshot(events) {
     const P = [];

@@ -3,6 +3,7 @@ const { chromium, devices } = require('playwright');
 (async () => {
   const URL = process.env.URL;
   const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  { const nc = b.newContext.bind(b); b.newContext = async (o) => { const c = await nc(o); await c.addInitScript(() => { try { localStorage.setItem('ht-tut-later', '1'); } catch {} }); return c; }; }   // skip the first-visit tutorial popup
   const ctx = await b.newContext({ locale: 'ja-JP', viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, userAgent: devices['iPhone 13'].userAgent });
   const p = await ctx.newPage({ locale: 'ja-JP' });
   const logs = []; p.on('pageerror', e => logs.push('PAGEERROR ' + e.message));

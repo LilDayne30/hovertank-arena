@@ -11,6 +11,13 @@ export async function createRoom(base, rules) {
   return (await r.json()).id;
 }
 
+// tutorial: a private room of one's own with two target tanks
+export async function createTutorial(base) {
+  const r = await fetch(`${base}/api/tutorial`, { method: 'POST' });
+  if (!r.ok) throw new RoomError('create_failed', tr('部屋を作れませんでした ({s})', { s: r.status }));
+  return (await r.json()).id;
+}
+
 // private room by passphrase: { id, created, rules } (same phrase -> same room)
 export async function joinPhrase(base, phrase, rules) {
   const r = await fetch(`${base}/api/phrase`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phrase, rules }) });

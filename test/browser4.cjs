@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 120000 });
     await p.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'), null, { timeout: 120000 });
     const loadMs = Date.now() - t0;
-    await p.evaluate(() => { try { localStorage.setItem('ht-quality', 'low'); } catch {} });
+    await p.evaluate(() => { try { localStorage.setItem('ht-quality', 'low'); localStorage.setItem('ht-tut-later', '1'); } catch {} });
     await p.fill('#name', name);
     return { ctx, p, name, loadMs };
   };

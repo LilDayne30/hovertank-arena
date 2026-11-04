@@ -1,5 +1,5 @@
 import * as pc from 'playcanvas';
-import { Room, roomInfo, quickMatch, joinPhrase, stats as fetchStats } from './net.js';
+import { Room, roomInfo, quickMatch, joinPhrase, createTutorial, stats as fetchStats } from './net.js';
 import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim, projectile, SHELL_KINDS,
 } from '../shared/sim.js';
@@ -11,8 +11,9 @@ import { buildStage } from './stage.js';
 import { setupPwa } from './pwa.js';
 import { Looks, emblemSvg } from './looks.js';
 import { Profile } from './profile.js';
-import { setupProgressUi, titleName } from './progress-ui.js';
-import { DEFAULT_LOOK } from '../shared/progress.js';
+import { setupProgressUi, titleName, rewardCards } from './progress-ui.js';
+import { DEFAULT_LOOK, ITEMS } from '../shared/progress.js';
+import { TUT_STEPS } from '../shared/tutorial.js';
 import { Sound } from './audio.js';
 import { t as tr, lang, setLang, onLang, initLang } from './i18n.js';
 
@@ -42,6 +43,8 @@ function hitStop(ms) { hitstop.until = Math.max(hitstop.until, performance.now()
 let lastCharge = 0;   // garage preview (lobby: its own tank on the hill; in a room: your tank)
 let input;
 let phraseJoin = null, quickStart = null, pinging = false;   // (declared before init() runs)
+let tut = null;   // in the tutorial room: { step, n, done } from the server (shared/tutorial.js)
+const TUT_KEYS = ITEMS.filter((i) => i.unlock.ach === 'tutorial').map((i) => i.key);
 let room = null, myId = null, mySlot = 0, phase = 'play';
 const roster = new Map();         // id -> {name, slot, connected}
 const tanks = new Map();          // id -> visual
@@ -167,6 +170,23 @@ async function init() {
     onSaved: () => { if (room) room.send('look', 1); },
   });
   profile.load().catch((e) => console.warn('profile', e.message));
+  // tutorial: suggested on the lobby until done (or "later"); the 🎓 button stays
+  profile.onChange(paintTutLobby);
+  const startTut = () => { $('tut-pop').classList.add('hidden'); start('tutorial'); };
+  $('btn-tut-start').onclick = startTut;
+  // the 🎓 button: before the tutorial is done it shows what you get first
+  $('btn-tutorial').onclick = () => { if (profile.view?.tut) startTut(); else { $('tut-pop-rew').innerHTML = rewardCards(TUT_KEYS); $('tut-pop').classList.remove('hidden'); } };
+  $('btn-tut-later').onclick = () => { store.set('ht-tut-later', '1'); $('tut-pop').classList.add('hidden'); paintTutLobby(); };
+  $('btn-tut-quit').onclick = () => leaveRoom();
+  $('btn-tut-lobby').onclick = () => leaveRoom();
+  $('btn-tut-equip').onclick = async () => {
+    $('btn-tut-equip').disabled = true;
+    try { await profile.saveLook({ ...(profile.view?.look || DEFAULT_LOOK), paint: 'cadet', rear: 'booster', title: 'cadet' }); } catch (e) { console.warn('look', e.message); }
+    $('btn-tut-equip').disabled = false;
+    await leaveRoom();
+    quickStart?.();
+  };
+  onLang(() => { paintTutLobby(); if (tut) paintTut(tut); });
   if (DEBUG) window.__ht.fxKill = (style, d = 16) => {   // debug: play a kill (effect + hit stop) in front of the camera
     const p = camera.getPosition(), f = camera.forward, x = p.x + f.x * d, z = p.z + f.z * d, gy = heightAt(world, x, z);
     fx.killStyle(x, gy + C.hoverHeight, z, mats.slotLit[1], style, { groundY: gy, big: true });
@@ -408,6 +428,7 @@ async function start(mode, rid, newRules, qmMode, qmSize = 4, qmGoal = 'time', q
       id = res.id; phraseJoin = { raw, created: res.created, rules: res.rules };
       store.sset(`ht-phrase-${id}`, raw);
     }
+    else if (mode === 'tutorial') id = await createTutorial(ENDPOINT);
     else {
       const info = await roomInfo(ENDPOINT, id);
       if (!info.exists) throw Object.assign(new Error('notfound'), { code: 'notfound' });
@@ -452,7 +473,8 @@ function bindRoom(r) {
     r.send('loadout', loadout);
     myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public;
     myPhrase = m.phrase ? (store.sget(`ht-phrase-${r.roomId}`) || m.phrase) : '';
-    $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; } });
+    $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; }
+    if (m.tut) enterTut(m.tut); });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
@@ -466,6 +488,8 @@ function bindRoom(r) {
   });
   r.onMessage('s', onSnapshot);
   r.onMessage('result', showResult);
+  r.onMessage('tut', (st) => paintTut(st));
+  r.onMessage('tutdone', (res) => showTutDone(res));
   r.onMessage('prog', (res) => { if (DEBUG) (window.__ht.progs ??= []).push(res); profile.applyProgress(res); pui.showMatchProgress(res); if (res?.after && res.before && res.after.level > res.before.level) setTimeout(() => sound.levelUp(), 900); });
   r.onMessage('pong', (t) => { ping = ping ? ping * 0.7 + (performance.now() - t) * 0.3 : performance.now() - t; });
   r.onDrop(() => { banner(tr('接続が切れました。再接続中…')); input.reset(); });
@@ -1263,7 +1287,7 @@ function updateLocalShells(dt) {
 
 // ------------------------------------------------------------------ HUD
 function colorCss(slot) { const c = PLAYER_COLORS[slot % 4]; return `rgb(${c.map((v) => Math.round(v * 255)).join(',')})`; }
-const BOT_EN = { レイ: 'Rei', ガロ: 'Garo', ミナ: 'Mina', ジン: 'Jin', ルカ: 'Luka', ソラ: 'Sora', ハク: 'Haku', ユズ: 'Yuzu' };
+const BOT_EN = { レイ: 'Rei', ガロ: 'Garo', ミナ: 'Mina', ジン: 'Jin', ルカ: 'Luka', ソラ: 'Sora', ハク: 'Haku', ユズ: 'Yuzu', 的A: 'Target A', 的B: 'Target B' };
 const shownName = (r) => (lang === 'en' && r?.bot && BOT_EN[r.name] ? BOT_EN[r.name] : r?.name ?? '');
 function nameOf(id) { const r = roster.get(id); return r ? shownName(r) : '???'; }
 let lastScores = new Map();
@@ -1393,6 +1417,62 @@ function wireResult() {
 }
 
 // back to the lobby without reloading the page (also used before re-matching)
+// ------------------------------------------------------------------ tutorial
+let tutPopShown = false;
+function paintTutLobby() {
+  const v = profile?.view, done = !!v?.tut;
+  $('tut-badge').classList.toggle('hidden', !v || done);
+  $('tut-pop-rew').innerHTML = rewardCards(TUT_KEYS);
+  // first visit: pop up once per page load until the tutorial is done or "later" was chosen
+  if (!v || done || store.get('ht-tut-later') === '1' || room || params.has('r')) { if (done || room) $('tut-pop').classList.add('hidden'); return; }
+  if (!tutPopShown) { tutPopShown = true; $('tut-pop').classList.remove('hidden'); }
+}
+// which on-screen control the current step is about (touch buttons glow; on PC the E / Q icons)
+const TUT_GLOW = { hit: ['btn-fire'], jump: ['btn-jump'], side: ['btn-side', 'ab-side'], ult: ['btn-ult', 'ab-ult'], kill: ['btn-fire'] };
+function tutGlow(id) {
+  for (const el of document.querySelectorAll('.tut-glow')) el.classList.remove('tut-glow');
+  for (const k of TUT_GLOW[id] || []) $(k)?.classList.add('tut-glow');
+  $('tut-hint-move').classList.toggle('hidden', id !== 'move');
+  $('tut-hint-aim').classList.toggle('hidden', id !== 'hit');
+}
+function enterTut(st) {
+  document.body.classList.add('tutorial');
+  $('tut-panel').classList.remove('hidden');
+  $('tut-pop').classList.add('hidden');
+  paintTut(st);
+}
+function paintTut(st) {
+  const prev = tut;
+  tut = st;
+  const N = TUT_STEPS.length, cur = TUT_STEPS[st.step];
+  tutGlow(cur?.id);
+  if (!cur) { $('tut-panel').classList.add('hidden'); return; }
+  const names = { side: tr(SIDE[loadout.side]?.name || ''), ult: tr(ULT[loadout.ult]?.name || '') };
+  $('tut-no').textContent = `${st.step + 1}/${N}`;
+  $('tut-title').textContent = tr(cur.title);
+  const cnt = cur.count ? tr(cur.count, { n: Math.min(st.n, cur.need), need: cur.need }) : '';
+  $('tut-text').textContent = tr(input?.touchMode ? cur.touch : cur.pc, names) + (cnt ? (lang === 'en' ? ` (${cnt})` : `（${cnt}）`) : '');
+  $('tut-fill').style.width = `${Math.min(100, ((st.step + Math.min(1, st.n / cur.need)) / N) * 100)}%`;
+  $('tut-dots').innerHTML = TUT_STEPS.map((_, i) => `<i class="${i < st.step ? 'done' : i === st.step ? 'now' : ''}"></i>`).join('');
+  if (prev && prev.step !== st.step) {
+    const el = $('tut-panel'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+    sound.chargeTing(2);   // step cleared
+  }
+}
+function showTutDone(res) {
+  if (res?.view) profile.applyProgress(res);
+  tut = { step: TUT_STEPS.length, n: 0, done: true };
+  $('tut-panel').classList.add('hidden');
+  document.exitPointerLock?.(); input.reset(); input.enabled = false;
+  tutGlow(null);
+  $('tut-done-rew').innerHTML = rewardCards(TUT_KEYS);
+  $('tut-done-p').textContent = res?.error ? tr('報酬を受け取れませんでした。通信を確かめて、もう一度チュートリアルを試してください。')
+    : res?.first === false ? tr('報酬はもう受け取っています。いつでも練習に使ってください。') : tr('限定アイテムを手に入れました');
+  $('btn-tut-equip').classList.toggle('hidden', !!res?.error);
+  $('tut-done').classList.remove('hidden');
+  setTimeout(() => sound.levelUp(), 200);
+}
+
 async function leaveRoom() {
   if (!room) return;
   const r = room; room = null;
@@ -1407,7 +1487,8 @@ async function leaveRoom() {
   outBuf = [];
   input.enabled = false; input.reset(); document.exitPointerLock?.();
   document.body.classList.remove('playing');
-  for (const id of ['hud', 'result', 'settings', 'invite', 'ready-bar', 'join-box']) $(id).classList.add('hidden');
+  for (const id of ['hud', 'result', 'settings', 'invite', 'ready-bar', 'join-box', 'tut-panel', 'tut-done']) $(id).classList.add('hidden');
+  tut = null; document.body.classList.remove('tutorial'); tutGlow(null); paintTutLobby();
   $('center-msg').textContent = ''; banner(''); $('lobby-status').textContent = '';
   $('lobby').classList.remove('hidden');
   history.replaceState(null, '', `${location.pathname}${DEBUG ? '?debug' : ''}`);
