@@ -7,6 +7,7 @@ import { SIDE, ULT, ULT_MAX, ULT_GAIN, DEFAULT_LOADOUT, cleanLoadout, SIDEARMS, 
 import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
 import { BotBrain, DummyBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel, randomLoadout } from './bot.js';
 import { TUT_STEPS, TUT_PLAYER, TUT_TARGETS, TUT_TARGET_NAMES } from './tutorial.js';
+import { isBadName } from './ngwords.js';
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -23,7 +24,8 @@ export const freshStats = () => ({ kills: 0, deaths: 0, hits: 0, dmg: 0, turbo: 
 
 export function sanitizeName(n) {
   if (typeof n !== 'string') return '';
-  return n.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
+  const v = n.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
+  return isBadName(v) ? '' : v;   // refused names fall back to "Player N"
 }
 
 export class Game {

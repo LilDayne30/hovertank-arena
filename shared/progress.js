@@ -17,7 +17,7 @@ export const totalForLevel = (L) => CUM[Math.max(1, Math.min(MAX_LEVEL, L))];
 
 // ------------------------------------------------------------------ cosmetic slots & items
 // unlock: { lv: n } from a level reward, { ach: id } from a long-term mission (or 'tutorial': finishing the
-// tutorial, see shared/tutorial.js), or {} = from the start
+// tutorial, see shared/tutorial.js), { shop: true } bought with gems (shared/shop.js), or {} = from the start
 export const SLOTS = [
   { k: 'paint', name: '塗装' }, { k: 'pattern', name: '柄' }, { k: 'turret', name: '砲塔' },
   { k: 'rear', name: 'リアパーツ' }, { k: 'side', name: 'サイド／フロント' }, { k: 'glow', name: 'ホバーの光' },
@@ -212,7 +212,7 @@ export function owned(level, achDone) {
   const set = new Set();
   for (const i of ITEMS) {
     const u = i.unlock;
-    if ((u.lv === undefined && u.ach === undefined) || (u.lv !== undefined && level >= u.lv) || (u.ach !== undefined && achDone[u.ach])) set.add(i.key);
+    if ((u.lv === undefined && u.ach === undefined && !u.shop) || (u.lv !== undefined && level >= u.lv) || (u.ach !== undefined && achDone[u.ach])) set.add(i.key);   // shop items: bought with gems (worker/profile.js)
   }
   return set;
 }

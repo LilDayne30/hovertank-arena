@@ -47,7 +47,7 @@ export function rewardCards(keys) {
   }).join('');
 }
 
-export function setupProgressUi({ profile, onPreview, onSaved, inRoom }) {
+export function setupProgressUi({ profile, onPreview, onSaved, inRoom, onDeleted }) {
   let view = null, draft = null, tab = 'paint', mtab = 'daily';
   // panels opened from the lobby replace it while they are open
   const open = (id) => { if (!inRoom()) $('lobby').classList.add('hidden'); $(id).classList.remove('hidden'); };
@@ -158,6 +158,15 @@ export function setupProgressUi({ profile, onPreview, onSaved, inRoom }) {
   let armed = 0;
   $('btn-transfer').onclick = () => { open('transfer'); $('tr-code').textContent = ''; $('tr-msg').textContent = ''; };
   $('btn-tr-close').onclick = () => close('transfer');
+  // delete everything (two taps: the first one asks for confirmation)
+  let delArmed = 0;
+  $('btn-delete-data').onclick = async () => {
+    const b = $('btn-delete-data');
+    if (performance.now() - delArmed > 4000) { delArmed = performance.now(); b.textContent = tr('本当に削除する（もう一度押す）'); setTimeout(() => { b.textContent = tr('データを削除'); }, 4000); return; }
+    b.disabled = true;
+    try { await profile.deleteData(); await onDeleted?.(); location.reload(); }
+    catch (e) { $('del-msg').textContent = tr('削除できませんでした（{m}）', { m: e.message }); b.disabled = false; }
+  };
   $('btn-tr-issue').onclick = async () => {
     try {
       const { code, expiresAt } = await profile.transferCode();

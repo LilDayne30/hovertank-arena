@@ -41,7 +41,7 @@ export function randomLook(level) {
   const have = level ? owned(level, {}) : null;
   for (const s of SLOTS) {
     if (s.k === 'title') continue;
-    const opts = ITEMS.filter((i) => i.slot === s.k && (!have || have.has(i.key)) && i.unlock.ach !== 'tutorial');   // tutorial rewards stay exclusive
+    const opts = ITEMS.filter((i) => i.slot === s.k && (!have || have.has(i.key)) && i.unlock.ach !== 'tutorial' && !i.unlock.shop);   // tutorial rewards and shop items stay exclusive
     if (opts.length && Math.random() < 0.6) look[s.k] = pick(opts).id;
   }
   if (!level || Math.random() < 0.5) look.paint = 'auto';

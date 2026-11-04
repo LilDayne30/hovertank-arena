@@ -7,6 +7,7 @@ import {
   levelOf, owned, cleanLook, DEFAULT_LOOK, STAT_KEYS, DAILY, DAILY_ALL_BONUS, ACHIEVEMENTS, dayKey, nextResetAt,
   pickDaily, rerollOne, matchXp, ITEM,
 } from '../shared/progress.js';
+import { gemPack, shopItem, spend } from '../shared/shop.js';
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 export const TOKEN_RE = /^[A-Za-z0-9_-]{32,64}$/;
@@ -35,7 +36,15 @@ export class PlayerProfile extends DurableObject {
   async save() { await this.ctx.storage.put('d', this.d); }
 
   // an admin profile (set by the owner from /admin.html) owns every item; level and missions are unchanged
-  ownedSet() { return this.d.admin ? new Set(ITEM.keys()) : owned(levelOf(this.d.xp).level, this.d.ach); }
+  ownedSet() {
+    if (this.d.admin) return new Set(ITEM.keys());
+    const s = owned(levelOf(this.d.xp).level, this.d.ach);
+    for (const k of this.d.bought || []) if (ITEM.has(k)) s.add(k);   // bought with gems
+    return s;
+  }
+  wallet() { const w = (this.d.wallet ??= { paid: 0, free: 0 }); return { paid: w.paid, free: w.free, total: w.paid + w.free }; }
+  // gem history (newest last, capped): kind = buy | spend | grant
+  log(entry) { this.d.gemLog = [...(this.d.gemLog || []).slice(-199), { at: Date.now(), ...entry }]; }
 
   daily(now = Date.now()) {
     const day = dayKey(now);
@@ -50,7 +59,7 @@ export class PlayerProfile extends DurableObject {
     return {
       level: lv.level, xp: d.xp, into: lv.into, need: lv.need,
       look: cleanLook(d.look, this.ownedSet()), owned: [...this.ownedSet()], admin: !!d.admin || undefined,
-      tut: !!d.ach.tutorial,
+      tut: !!d.ach.tutorial, gems: this.wallet(),
       stats: d.stats,
       ach: ACHIEVEMENTS.map((a) => ({ id: a.id, done: !!d.ach[a.id], prog: Math.min(a.target, d.stats[a.key] || 0) })),
       daily: { day: dl.day, resetAt: nextResetAt(), ids: dl.ids, prog: dl.prog, done: dl.done, rerolled: dl.rerolled, bonus: dl.bonus },
@@ -80,6 +89,40 @@ export class PlayerProfile extends DurableObject {
       }
       await this.save();
       return json(this.view());
+    }
+    // a verified store purchase (worker/iap.js checked it with Apple / Google): add the gems once
+    if (url.pathname === '/credit') {
+      const pack = gemPack(body.productId);
+      if (!pack || typeof body.key !== 'string') return json({ error: 'bad_product' }, 400);
+      const done = (this.d.txs ??= []);
+      if (!done.includes(body.key)) {
+        const n = pack.gems * Math.max(1, Math.min(10, Number(body.quantity) || 1));
+        this.wallet(); this.d.wallet.paid += n;
+        this.d.txs = [...done.slice(-499), body.key];
+        this.log({ kind: 'buy', paid: n, ref: body.key, product: pack.id });
+        await this.save();
+        return json({ credited: n, view: this.view() });
+      }
+      return json({ credited: 0, again: true, view: this.view() });
+    }
+    // buy a shop item with gems (free gems are spent first, see shared/shop.js)
+    if (url.pathname === '/shop') {
+      const it = shopItem(body.key);
+      if (!it || !ITEM.has(it.key)) return json({ error: 'not_for_sale' }, 400);
+      if (this.ownedSet().has(it.key)) return json({ error: 'owned', view: this.view() }, 409);
+      this.wallet();
+      const r = spend(this.d.wallet, it.price);
+      if (!r) return json({ error: 'not_enough', view: this.view() }, 402);
+      this.d.wallet = r.wallet;
+      this.d.bought = [...(this.d.bought || []), it.key];
+      this.log({ kind: 'spend', paid: -r.took.paid, free: -r.took.free, ref: it.key });
+      await this.save();
+      return json({ bought: it.key, view: this.view() });
+    }
+    if (url.pathname === '/delete') {
+      await this.ctx.storage.deleteAll();
+      this.d = null;
+      return json({ deleted: true });
     }
     if (url.pathname === '/award') return json(await this.award(body));
     // the tutorial room reports that this player finished every step (worker/room.js): unlock the rewards once

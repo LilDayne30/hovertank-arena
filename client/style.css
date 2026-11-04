@@ -41,7 +41,9 @@ input { font: inherit; border-radius: 6px; border: 1px solid #6b5138; padding: 8
 #install button { font-size: 14px; padding: 8px 14px; }
 #install-help { font-size: 13px; color: #ffe8c4; margin: 6px 0 0; line-height: 1.5; }
 button:disabled { opacity: .5; cursor: default; }
-#credits-link { color: #ffd9a0; font-size: 12px; }
+#credits-link, .lb-links a { color: #ffd9a0; font-size: 12px; }
+.lb-links { margin: 0; } .links a { color: #ffd9a0; }
+.lobby-sec.danger #btn-delete-data { border-color: rgba(255,120,100,.6); color: #ffb3a6; }
 #invite-url { width: 100%; font-size: 13px; }
 #quality-row button[aria-pressed="true"] { background: #fff; }
 #result-list { text-align: left; font-size: 17px; line-height: 1.7; padding-left: 1.6em; }
@@ -531,3 +533,13 @@ body.layout-edit #touch-layer { display: block !important; z-index: 55; backgrou
 body.layout-edit .tbtn { outline: 2px dashed rgba(255,214,140,.95); outline-offset: 3px; cursor: grab; touch-action: none; }
 body.layout-edit .tbtn.dragging { background: rgba(255,181,71,.55); cursor: grabbing; }
 body.layout-edit #stick-base { display: none !important; }
+
+/* in the Android / iOS app */
+body.native #btn-fullscreen, body.native #install { display: none !important; }
+
+/* shop */
+.shop-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.shop-grid button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 8px; background: rgba(255,255,255,.08); color: var(--ink); border: 1px solid rgba(255,181,71,.45); }
+.shop-grid button b { font-size: 16px; } .shop-grid button small { opacity: .8; }
+.shop-grid button.owned { opacity: .55; }
+#shop-gems { color: #8fe3ff; font-size: 15px; margin-left: 6px; }

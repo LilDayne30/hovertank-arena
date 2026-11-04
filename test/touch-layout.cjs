@@ -72,6 +72,7 @@ const ok = (c, m) => { console.log(`${c ? 'PASS' : 'FAIL'}  ${m}`); if (!c) proc
     const h = window.__ht, me = h.local.t, s = h.snaps[h.snaps.length - 1];
     let best = null, bd = 1e9;
     for (const o of s.players.values()) { if (!o.alive) continue; const d = Math.hypot(o.x - me.x, o.z - me.z); if (d > 1 && d < bd) { bd = d; best = o; } }
+    if (!best) return;   // both targets down for a moment
     const dx = best.x - me.x, dz = best.z - me.z, d = Math.hypot(dx, dz);
     h.setCam(Math.atan2(-dx, -dz), Math.atan2(best.y + 0.9 - (me.y + 3.2), d + 8.5));
   });

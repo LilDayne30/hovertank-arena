@@ -1,0 +1,12 @@
+{
+  "appId": "com.lildayne.hovertank",
+  "appName": "Hover Tank Arena",
+  "webDir": "dist-app",
+  "backgroundColor": "#2b1d12",
+  "loggingBehavior": "debug",
+  "android": { "backgroundColor": "#2b1d12" },
+  "ios": { "backgroundColor": "#2b1d12", "contentInset": "never", "scrollEnabled": false },
+  "plugins": {
+    "NativePurchases": { "autoFinishTransactions": false }
+  }
+}

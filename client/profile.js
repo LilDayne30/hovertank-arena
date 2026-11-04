@@ -1,5 +1,6 @@
 // Progression client: keeps the anonymous profile token on this device and talks to /api/profile.
 // The server decides everything (XP, unlocks); this only caches the latest view for the UI.
+import { NATIVE, PLATFORM } from './platform.js';
 const KEY = 'ht-pid';
 const get = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
 const set = (v) => { try { localStorage.setItem(KEY, v); } catch { /* private mode: profile lasts this session */ } };
@@ -14,7 +15,7 @@ let arrivalSrc = (() => {
     history.replaceState(history.state, '', u.pathname + (rest.length ? `?${rest.join('&')}` : '') + u.hash);
     return SRC_RE.test(s) ? s : null;
   } catch { return null; }
-})();
+})() || (NATIVE ? `app-${PLATFORM}` : null);   // installs from the stores are counted as app-ios / app-android
 
 export class Profile {
   constructor(base) {
@@ -57,6 +58,12 @@ export class Profile {
   async saveLook(look) { this.view = await this.call('/look', { look }); this.emit(); return this.view; }
   async reroll(index) { this.view = await this.call('/reroll', { index }); this.emit(); return this.view; }
   async transferCode() { return this.call('/transfer', {}); }
+  // erase this profile on the server and forget the key on this device (a fresh one is made on the next start)
+  async deleteData() {
+    await this.call('/delete', {});
+    this.token = null; this.view = null;
+    try { localStorage.removeItem(KEY); } catch { /* ignore */ }
+  }
   async redeem(code) {
     const { token, profile } = await this.call('/redeem', { code });
     this.token = token; set(token); this.view = profile; this.emit();

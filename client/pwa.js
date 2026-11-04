@@ -1,4 +1,5 @@
 import { t as tr } from './i18n.js';
+import { NATIVE } from './platform.js';
 // PWA glue: service worker registration, "add to home screen" button, offline notice.
 const $ = (id) => document.getElementById(id);
 
@@ -8,15 +9,13 @@ export const isInstalled = () =>
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 export function setupPwa({ onOffline } = {}) {
-  if ('serviceWorker' in navigator && import.meta.env.PROD) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker not registered', e));
-    });
-  }
+  // (the game starts after boot.js, so the page may already be loaded)
+  const reg = () => navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker not registered', e));
+  if (!NATIVE && 'serviceWorker' in navigator && import.meta.env.PROD) { if (document.readyState === 'complete') reg(); else window.addEventListener('load', reg); }
 
   const box = $('install'), btn = $('btn-install'), help = $('install-help');
   let deferred = null;
-  if (!isInstalled()) {
+  if (!NATIVE && !isInstalled()) {
     // Android / desktop Chrome & Edge: the browser offers a real install prompt
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();

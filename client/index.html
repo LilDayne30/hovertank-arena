@@ -87,6 +87,7 @@
     <nav class="lb-left" aria-label="メニュー">
       <button id="btn-garage" type="button" class="side-btn"><b aria-hidden="true">🎨</b><span>ガレージ</span></button>
       <button id="btn-missions" type="button" class="side-btn"><b aria-hidden="true">🎯</b><span>ミッション</span><i id="pb-badge" class="badge"></i></button>
+      <button id="btn-shop" type="button" class="side-btn hidden"><b aria-hidden="true">💎</b><span>ショップ</span></button>
       <button id="btn-tutorial" type="button" class="side-btn tight"><b aria-hidden="true">🎓</b><span>チュートリアル</span><i id="tut-badge" class="badge hidden">🎁</i></button>
     </nav>
     <div class="lb-right" aria-label="装備（タップで変更）">
@@ -106,7 +107,7 @@
       <p id="lobby-status" role="status"></p>
       <div id="install" class="hidden"><button id="btn-install" type="button">ホーム画面に追加</button><p id="install-help" class="hidden"></p></div>
     </div>
-    <a id="credits-link" class="lb-bl" href="./credits.html" target="_blank" rel="noopener">クレジット</a>
+    <p class="lb-bl lb-links"><a id="credits-link" href="./credits.html" target="_blank" rel="noopener">クレジット</a> · <a href="./privacy.html" target="_blank" rel="noopener">プライバシー</a> · <a href="./support.html" target="_blank" rel="noopener">サポート</a></p>
   </div>
 
   <!-- sheets opened from the lobby (tap outside or 閉じる to close) -->
@@ -161,6 +162,10 @@
     <p class="note">レベル・アイテム・ミッションの進み具合は、この端末に保存されたIDでサーバーに記録されています（アカウント登録は不要）。機種変更するときや、iPhoneでSafariとホーム画面版の両方で遊ぶときは、引き継ぎコードで同じデータを使えます。</p>
     <div class="lobby-sec"><div class="sec-h">この端末のデータを別の端末で使う</div><button id="btn-tr-issue" type="button">引き継ぎコードを発行</button><p id="tr-code"></p></div>
     <div class="lobby-sec"><div class="sec-h">別の端末のデータをこの端末で使う</div><div class="row"><input id="tr-input" placeholder="XXXX-XXXX" maxlength="12" autocomplete="off" autocapitalize="characters" /><button id="btn-tr-redeem" type="button">引き継ぐ</button></div><p id="tr-msg" class="note"></p></div>
+    <div class="lobby-sec danger"><div class="sec-h">この端末のデータを削除する</div>
+      <p class="note">レベル・アイテム・ジェム・ミッションの記録をサーバーから消して、最初からになります。元には戻せません。</p>
+      <button id="btn-delete-data" type="button" class="ghost">データを削除</button><p id="del-msg" class="note"></p></div>
+    <p class="note links"><a href="./privacy.html" target="_blank" rel="noopener">プライバシーポリシー</a> · <a href="./support.html" target="_blank" rel="noopener">サポート</a></p>
     <div class="row"><button id="btn-tr-close" type="button">閉じる</button></div>
   </div>
 
@@ -195,6 +200,14 @@
     <div class="row"><button id="btn-fullscreen" type="button">全画面</button><button id="btn-leave" type="button">退出</button><button id="btn-settings-close" type="button">閉じる</button></div>
   </div>
 
+  <!-- shop (hidden until shared/shop.js has items): gems bought in the app, items for gems -->
+  <div id="shop" class="panel wide scrollable hidden" role="dialog" aria-labelledby="shop-h">
+    <button type="button" class="x-close" id="btn-shop-x" aria-label="閉じる">✕</button>
+    <h2 id="shop-h">ショップ <small id="shop-gems"></small></h2>
+    <div id="shop-packs-box" class="lobby-sec"><div class="sec-h">ジェムを買う</div><div id="shop-packs" class="shop-grid"></div><p class="note">購入したジェムに有効期限はありません。</p></div>
+    <div class="lobby-sec"><div class="sec-h">アイテム</div><div id="shop-items" class="shop-grid"></div></div>
+    <p id="shop-msg" class="note" role="status"></p>
+  </div>
   <!-- first visit: the tutorial and what finishing it gives (hidden for good after "あとで") -->
   <div id="tut-pop" class="panel pop-modal scrollable hidden" role="dialog" aria-labelledby="tut-pop-h">
     <h2 id="tut-pop-h">はじめての方へ</h2>
@@ -221,8 +234,8 @@
   <div id="ready-bar" class="hidden"><span id="ready-text"></span><button id="btn-ready" type="button">次の試合へ</button><button id="btn-ready-result" type="button" class="ghost">結果</button></div>
   <div id="banner" class="hidden"></div>
   <div id="rotate">端末を横向きにしてください</div>
-  <div id="loading" class="hidden"><div class="spinner"></div><p id="loading-text">読み込み中…</p></div>
+  <div id="loading"><div class="spinner"></div><p id="loading-text">Loading…</p></div>
 
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./boot.js"></script>
 </body>
 </html>

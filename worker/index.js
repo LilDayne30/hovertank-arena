@@ -4,6 +4,9 @@ export { BattleRoom } from './room.js';
 export { Matchmaker } from './matchmaker.js';
 export { PlayerProfile, TransferCodes } from './profile.js';
 export { GameStats } from './stats.js';
+export { PurchaseLedger } from './iap.js';
+import { verifyPurchase, IapError } from './iap.js';
+import { accountToken, gemPack } from '../shared/shop.js';
 import { statEvent, statsStub } from './stats.js';
 import { roomCode, phraseRoomId } from './codes.js';
 import { normPhrase } from '../shared/arena.js';
@@ -14,9 +17,33 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
 });
 
+// the Android / iOS apps load the game from their own bundle (origin capacitor://localhost on iOS,
+// https://localhost on Android) and call this server: allow exactly those origins on /api
+const APP_ORIGINS = new Set(['capacitor://localhost', 'https://localhost', 'ionic://localhost']);
+function withCors(res, origin) {
+  if (!origin || !APP_ORIGINS.has(origin) || res.status === 101) return res;
+  const r = new Response(res.body, res);
+  r.headers.set('access-control-allow-origin', origin);
+  r.headers.set('vary', 'origin');
+  return r;
+}
+
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+    const url = new URL(request.url), origin = request.headers.get('origin');
+    if (url.pathname.startsWith('/api/')) {
+      if (request.method === 'OPTIONS') {
+        if (!APP_ORIGINS.has(origin)) return new Response(null, { status: 403 });
+        return new Response(null, { status: 204, headers: {
+          'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, POST, OPTIONS',
+          'access-control-allow-headers': 'authorization, content-type, x-src', 'access-control-max-age': '86400', vary: 'origin' } });
+      }
+      return withCors(await this.route(request, env, ctx, url), origin);
+    }
+    return this.route(request, env, ctx, url);
+  },
+
+  async route(request, env, ctx, url) {
     if (url.pathname === '/api/health') return json({ ok: true });
 
     if (url.pathname === '/api/rooms' && request.method === 'POST') {
@@ -81,6 +108,9 @@ export default {
 //   POST /api/profile/reroll    { index }  -> profile  (one daily mission swap per day)
 //   POST /api/profile/transfer  -> { code, expiresAt }  (one-time code, 24 h)
 //   POST /api/profile/redeem    { code }   -> { token, profile }
+//   POST /api/profile/delete    -> { deleted: true }  (everything stored for this profile is erased)
+//   POST /api/profile/iap       { platform, productId, transactionId | purchaseToken } -> { credited, view }
+//   POST /api/profile/shop      { key }    -> { bought, view }   (spend gems on an item)
 async function profileApi(request, env, path, ctx) {
   const src = /^[a-z0-9_-]{1,24}$/.test(request.headers.get('x-src') || '') ? request.headers.get('x-src') : undefined;   // ?s= tag of an X post etc.
   const codes = env.CODES.get(env.CODES.idFromName('global'));
@@ -110,6 +140,24 @@ async function profileApi(request, env, path, ctx) {
   if (path === '/look') return post(stub, '/look', { look: body.look });
   if (path === '/reroll') return post(stub, '/reroll', { index: body.index });
   if (path === '/transfer') return post(codes, '/issue', { token });
+  if (path === '/delete') return post(stub, '/delete', {});   // the player deletes their data (app store requirement)
+  if (path === '/shop') return post(stub, '/shop', { key: body.key });
+  // in-app purchase: check it with the store, record it globally (once), then add the gems
+  if (path === '/iap') {
+    if (!gemPack(body.productId)) return json({ error: 'bad_product' }, 400);
+    try {
+      const acct = await accountToken(pkey);
+      const v = await verifyPurchase(env, body, acct);
+      const led = env.PURCHASES.get(env.PURCHASES.idFromName('global'));
+      const c = await (await led.fetch('https://iap/claim', { method: 'POST', body: JSON.stringify({ key: v.key, pkey, productId: v.productId }) })).json();
+      if (!c.ok) return json({ error: 'used' }, 409);
+      return post(stub, '/credit', { key: v.key, productId: v.productId, quantity: v.quantity });
+    } catch (e) {
+      if (e instanceof IapError) return json({ error: e.code }, e.status);
+      console.warn('iap', e?.message);
+      return json({ error: 'server' }, 500);
+    }
+  }
   return json({ error: 'not found' }, 404);
 }
 

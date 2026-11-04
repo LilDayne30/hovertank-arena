@@ -14,12 +14,15 @@ import { Profile } from './profile.js';
 import { setupProgressUi, titleName, rewardCards } from './progress-ui.js';
 import { DEFAULT_LOOK, ITEMS } from '../shared/progress.js';
 import { TUT_STEPS } from '../shared/tutorial.js';
+import { SHOP_OPEN, SHOP_ITEMS, GEM } from '../shared/shop.js';
+import { gemProducts, buyGems, recoverPurchases } from './store.js';
 import { Sound } from './audio.js';
 import { applyTouchLayout, editTouchLayout } from './touch-layout.js';
+import { NATIVE, PLATFORM, API_BASE, haptic, openExternal, onBackButton, clearNative } from './platform.js';
 import { t as tr, lang, setLang, onLang, initLang } from './i18n.js';
 
 // ------------------------------------------------------------------ config
-const ENDPOINT = location.origin;   // the Worker serves both the page and /api
+const ENDPOINT = API_BASE;   // the Worker serves both the page and /api (the app talks to the same server)
 const INTERP_TICKS = 3.5;          // remote entities are rendered ~115 ms in the past
 const CAM_DIST = 8.5, CAM_PIVOT = 2.3, CAM_LIFT = 0.9, BASE_FOV = 62;
 const $ = (id) => document.getElementById(id);
@@ -85,6 +88,16 @@ init().catch((e) => { console.error(e); showLoading(false); $('lobby-status').te
 
 async function init() {
   document.body.classList.toggle('touch', matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window);
+  document.body.classList.toggle('native', NATIVE);   // in the app: no full-screen / install buttons (style.css)
+  document.body.dataset.platform = PLATFORM;
+  // links that open another page (credits, privacy policy): the system browser in the app
+  document.addEventListener('click', (e) => { const a = e.target.closest?.('a[target="_blank"]'); if (a && NATIVE) { e.preventDefault(); openExternal(a.getAttribute('href')); } });
+  onBackButton(() => {
+    const open = [...document.querySelectorAll('.panel:not(.hidden), .sheet:not(.hidden)')].filter((el) => el.id !== 'result');
+    if (open.length) { const x = open.at(-1).querySelector('.x-close, #btn-settings-close, #btn-lo-close, [id$="-close"]'); if (x) { x.click(); return true; } }
+    if (room) { $('btn-settings').click(); return true; }
+    return false;
+  });
   initLang();
   // language: one button in the lobby (top right) and one in settings; shows the language you switch TO
   const paintLang = () => { for (const id of ['btn-lang', 'btn-lang2']) $(id).textContent = lang === 'en' ? '🌐 日本語' : '🌐 English'; };
@@ -171,6 +184,7 @@ async function init() {
       if (preview.v) { removeTank('__preview'); preview.v = null; }
     },
     onSaved: () => { if (room) room.send('look', 1); },
+    onDeleted: () => clearNative(),
   });
   profile.load().catch((e) => console.warn('profile', e.message));
   // tutorial: suggested on the lobby until done (or "later"); the 🎓 button stays
@@ -190,6 +204,7 @@ async function init() {
     quickStart?.();
   };
   onLang(() => { paintTutLobby(); if (tut) paintTut(tut); });
+  setupShop();
   if (DEBUG) window.__ht.fxKill = (style, d = 16) => {   // debug: play a kill (effect + hit stop) in front of the camera
     const p = camera.getPosition(), f = camera.forward, x = p.x + f.x * d, z = p.z + f.z * d, gy = heightAt(world, x, z);
     fx.killStyle(x, gy + C.hoverHeight, z, mats.slotLit[1], style, { groundY: gy, big: true });
@@ -280,7 +295,7 @@ async function setupEngine() {
 // Binary assets are shipped pre-gzipped (<file>.gz, see vite.config.js) because the CDN does not
 // compress .glb/.bin. Decompress in the browser; fall back to the plain file if needed.
 async function fetchBinary(url) {
-  if (typeof DecompressionStream !== 'undefined') {
+  if (!NATIVE && typeof DecompressionStream !== 'undefined') {   // (the app has the files locally: no .gz copies)
     try {
       const r = await fetch(`${url}.gz`);
       if (r.ok) return await new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
@@ -543,8 +558,8 @@ function onSnapshot(m) {
   else serverTick += (s.k - serverTick) * 0.08;
   for (const e of m.e) {
     if (DEBUG && !["boost"].includes(e.t)) (window.__ev ??= []).push(`${e.t}:${e.k || ""}:${e.v || ""}:${e.d || ""}`);
-    if (e.t === 'hit' && e.o === myId) { flashHitmark(); sound.hitConfirm(); }
-    if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); sound.hurt(); }
+    if (e.t === 'hit' && e.o === myId) { flashHitmark(); sound.hitConfirm(); haptic('light'); }
+    if (e.t === 'hit' && e.v === myId) { flashDamage(); fx.addShake(0.5); sound.hurt(); haptic('light'); }
     if (e.t === 'team' && e.v !== myId) notice(tr('{n} が{t}に移動', { n: escapeHtml(nameOf(e.v)), t: tr(TEAM_NAMES[e.team]) }));
     if (e.t === 'newgame') {
       sound.horn();
@@ -1060,8 +1075,8 @@ function flushEvents(rt) {
       fx.killStyle(e.x, e.y, e.z, vt?.mats?.[0] || mats.slotLit[(roster.get(e.v)?.slot ?? 0) % 4], roster.get(e.k)?.look?.boom, { groundY: heightAt(world, e.x, e.z), big: mine || me });
       feed(e.k, e.v);
       sound.kill(e, mine, me);
-      if (me) { centerFlash(tr('撃破された…'), 1800); screenFlash('death'); fovKick = 10; }   // (no hit stop on your own death: it read as lag)
-      else if (mine) { centerFlash(tr('撃破！'), 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; }
+      if (me) { centerFlash(tr('撃破された…'), 1800); screenFlash('death'); fovKick = 10; haptic('heavy'); }   // (no hit stop on your own death: it read as lag)
+      else if (mine) { centerFlash(tr('撃破！'), 1200, true); fx.addShake(0.5); hitStop(120); screenFlash('kill'); sound.impact(); fovKick = -9; haptic('medium'); }
     }
   }
 }
@@ -1439,6 +1454,42 @@ function wireResult() {
 }
 
 // back to the lobby without reloading the page (also used before re-matching)
+// ------------------------------------------------------------------ shop (gems, items for gems)
+function setupShop() {
+  const open = SHOP_OPEN || (DEBUG && params.has('shop'));
+  $('btn-shop').classList.toggle('hidden', !open);
+  if (!open) return;
+  // the app: finish purchases that were paid for but not settled (closed app, lost connection)
+  if (NATIVE) profile.load().then(() => recoverPurchases(profile)).then((n) => { if (n) notice(tr('未処理だった購入を反映しました')); }).catch(() => {});
+  const paint = async () => {
+    const v = profile.view;
+    $('shop-gems').textContent = v?.gems ? `${GEM.icon} ${v.gems.total.toLocaleString()}` : '';
+    const own = new Set(v?.owned || []);
+    $('shop-items').innerHTML = SHOP_ITEMS.map((it) => `<button type="button" data-key="${it.key}" class="${own.has(it.key) ? 'owned' : ''}"><b>${escapeHtml(tr(ITEMS.find((i) => i.key === it.key)?.name || it.key))}</b><small>${own.has(it.key) ? tr('購入済み') : `${GEM.icon} ${it.price}`}</small></button>`).join('') || `<p class="note">${tr('準備中です')}</p>`;
+    $('shop-packs-box').classList.toggle('hidden', !NATIVE);
+    if (NATIVE) {
+      const packs = await gemProducts().catch(() => []);
+      $('shop-packs').innerHTML = packs.map((g) => `<button type="button" data-pack="${g.id}"><b>${GEM.icon} ${g.gems.toLocaleString()}</b><small>${escapeHtml(g.product.priceString)}</small></button>`).join('') || `<p class="note">${tr('ストアに接続できませんでした')}</p>`;
+    }
+  };
+  $('btn-shop').onclick = () => { $('shop-msg').textContent = ''; $('shop').classList.remove('hidden'); paint(); };
+  $('btn-shop-x').onclick = () => $('shop').classList.add('hidden');
+  $('shop').addEventListener('click', async (e) => {
+    const b = e.target.closest('button[data-pack], button[data-key]');
+    if (!b || b.disabled) return;
+    b.disabled = true; $('shop-msg').textContent = '';
+    try {
+      if (b.dataset.pack) { const r = await buyGems(profile, b.dataset.pack); $('shop-msg').textContent = tr('{n} ジェムを受け取りました', { n: r.credited }); }
+      else { const res = await profile.call('/shop', { key: b.dataset.key }); profile.applyProgress(res); $('shop-msg').textContent = tr('購入しました。ガレージで装備できます'); }
+    } catch (err) {
+      $('shop-msg').textContent = err.cancelled ? '' : err.pending ? tr('支払いの確認待ちです。完了すると自動で反映されます')
+        : err.retryLater ? tr('購入は完了しています。反映に失敗したので、次の起動時にもう一度確認します')
+          : err.status === 402 ? tr('ジェムが足りません') : tr('購入できませんでした（{m}）', { m: err.message });
+    }
+    b.disabled = false; paint();
+  });
+}
+
 // ------------------------------------------------------------------ tutorial
 let tutPopShown = false;
 function paintTutLobby() {
