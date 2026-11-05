@@ -5,3 +5,5 @@ scratch/
 *.log
 .wrangler/
 dist-app/
+*.jks
+*.keystore
