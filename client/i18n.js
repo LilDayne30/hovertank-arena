@@ -121,6 +121,7 @@ const EN = {
   'チュートリアル': 'Tutorial', 'はじめての方へ': 'New here?',
   'あとで': 'Later', '中断': 'Quit',
   'ショップ': 'Shop', 'ジェムを買う': 'Buy gems', '購入したジェムに有効期限はありません。': 'Purchased gems never expire.', 'アイテム': 'Items', '購入済み': 'Owned', '準備中です': 'Coming soon',
+  'ロイヤルパープル': 'Royal Purple', 'プラチナ': 'Platinum', 'サンセット': 'Sunset', 'ショップで購入（{g} {n}）': 'Buy in the shop ({g} {n})',
   'ストアに接続できませんでした': 'Could not reach the store', '{n} ジェムを受け取りました': 'You received {n} gems', '購入しました。ガレージで装備できます': 'Bought. Equip it in the garage',
   '支払いの確認待ちです。完了すると自動で反映されます': 'Waiting for the payment to clear. It will be added automatically.',
   '購入は完了しています。反映に失敗したので、次の起動時にもう一度確認します': 'The purchase went through but could not be added yet. It will be checked again next time you start the game.',

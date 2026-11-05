@@ -542,4 +542,17 @@ body.native #btn-fullscreen, body.native #install { display: none !important; }
 .shop-grid button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 8px; background: rgba(255,255,255,.08); color: var(--ink); border: 1px solid rgba(255,181,71,.45); }
 .shop-grid button b { font-size: 16px; } .shop-grid button small { opacity: .8; }
 .shop-grid button.owned { opacity: .55; }
+.shop-grid button .sw { width: 34px; height: 34px; border-radius: 50%; margin-bottom: 2px; }
+.shop-grid button .sw.glow { box-shadow: 0 0 14px currentColor; }
+.shop-grid button em { font-style: normal; font-size: 12px; opacity: .7; }
 #shop-gems { color: #8fe3ff; font-size: 15px; margin-left: 6px; }
+#shop { z-index: 30; background: rgba(30, 21, 12, .96); width: min(640px, calc(100vw - 32px)); box-shadow: 0 0 0 100vmax rgba(10, 6, 2, .6), 0 10px 40px rgba(0,0,0,.45); border: 2px solid rgba(255,181,71,.55); }
+#shop .shop-grid { grid-template-columns: repeat(4, 1fr); }
+@media (max-height: 500px) {
+  #shop { padding: 10px 14px; } #shop h2 { font-size: 18px; margin: 0 0 4px; }
+  #shop .lobby-sec { margin: 4px 0; } #shop .sec-h { margin-bottom: 4px; }
+  #shop .shop-grid button { padding: 6px 4px; gap: 1px; } #shop .shop-grid button b { font-size: 14px; }
+  #shop .shop-grid button .sw { width: 24px; height: 24px; }
+  #shop .note { margin: 4px 0 0; font-size: 12px; }
+}
+@media (max-width: 520px) { #shop .shop-grid { grid-template-columns: repeat(2, 1fr); } }

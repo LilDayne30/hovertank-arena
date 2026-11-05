@@ -4,6 +4,7 @@ import {
 } from '../shared/progress.js';
 import { PLAYER_COLORS } from '../shared/arena.js';
 import { emblemSvg } from './looks.js';
+import { GEM, shopItem } from '../shared/shop.js';
 import { t as tr, tLine, lang, onLang } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
@@ -17,11 +18,12 @@ export const titleName = (id) => (id && id !== 'none' ? tr(item('title', id)?.na
 export function unlockText(it) {
   if (it.unlock.lv) return tr('Lv.{n}で解放', { n: it.unlock.lv });
   if (it.unlock.ach === 'tutorial') return tr('チュートリアルをクリアで解放');
+  if (it.unlock.shop) return tr('ショップで購入（{g} {n}）', { g: GEM.icon, n: shopItem(it.key)?.price ?? '' });
   if (it.unlock.ach) { const a = achOf(it.unlock.ach); return tr('「{t}」（{x}）で解放', { t: tr(a.title), x: tr(a.text) }); }
   return '';
 }
 
-function swatch(it) {
+export function swatch(it) {
   if (it.slot === 'paint') return it.color ? `<i class="sw" style="background:${css(it.color)}"></i>` : `<i class="sw" style="background:conic-gradient(${PLAYER_COLORS.slice(0, 4).map(css).join(',')})"></i>`;
   if (['glow', 'trail', 'spark'].includes(it.slot)) return it.rainbow ? '<i class="sw" style="background:linear-gradient(90deg,#f55,#fd4,#5f7,#4cf,#b6f)"></i>' : `<i class="sw glow" style="background:${css(it.color)}"></i>`;
   if (it.slot === 'emblem') return it.id === 'none' ? '<i class="sw none"></i>' : emblemSvg(it.id, 18);

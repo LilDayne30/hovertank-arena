@@ -24,11 +24,17 @@ export const gemPack = (id) => GEM_PACKS.find((p) => p.id === id);
 
 // Items sold for gems. Each key must be an item in shared/progress.js whose unlock is { shop: true }
 // (shop items are never unlocked by levels or missions and never worn by CPU tanks).
-//   e.g. { key: 'paint:neon', price: 300 }
-export const SHOP_ITEMS = [];
+// Prices: 100 gems = the smallest pack (¥160).
+export const SHOP_ITEMS = [
+  { key: 'paint:royal', price: 200 },
+  { key: 'glow:platinum', price: 300 },
+  { key: 'trail:sunset', price: 300 },
+  { key: 'spark:violet', price: 200 },
+];
 export const shopItem = (key) => SHOP_ITEMS.find((s) => s.key === key);
 
-// the shop (and gem purchases) stay hidden until there is something to sell
+// the shop (and gem purchases) stay hidden until there is something to sell. On the web the shop button
+// only shows for players who already have gems (gems are bought in the apps).
 export const SHOP_OPEN = SHOP_ITEMS.length > 0;
 
 // The UUID that ties a store purchase to a profile (StoreKit appAccountToken / Play obfuscatedAccountId),

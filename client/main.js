@@ -11,10 +11,10 @@ import { buildStage } from './stage.js';
 import { setupPwa } from './pwa.js';
 import { Looks, emblemSvg } from './looks.js';
 import { Profile } from './profile.js';
-import { setupProgressUi, titleName, rewardCards } from './progress-ui.js';
-import { DEFAULT_LOOK, ITEMS } from '../shared/progress.js';
+import { setupProgressUi, titleName, rewardCards, swatch } from './progress-ui.js';
+import { DEFAULT_LOOK, ITEMS, SLOTS } from '../shared/progress.js';
 import { TUT_STEPS } from '../shared/tutorial.js';
-import { SHOP_OPEN, SHOP_ITEMS, GEM } from '../shared/shop.js';
+import { SHOP_OPEN, SHOP_ITEMS, GEM, GEM_PACKS } from '../shared/shop.js';
 import { gemProducts, buyGems, recoverPurchases } from './store.js';
 import { Sound } from './audio.js';
 import { applyTouchLayout, editTouchLayout } from './touch-layout.js';
@@ -1456,19 +1456,26 @@ function wireResult() {
 // back to the lobby without reloading the page (also used before re-matching)
 // ------------------------------------------------------------------ shop (gems, items for gems)
 function setupShop() {
-  const open = SHOP_OPEN || (DEBUG && params.has('shop'));
-  $('btn-shop').classList.toggle('hidden', !open);
-  if (!open) return;
+  // the app: always (gems are bought here). The web: only for players who already have gems.
+  const open = () => (SHOP_OPEN && (NATIVE || (profile.view?.gems?.total || 0) > 0)) || (DEBUG && params.has('shop'));
+  const toggle = () => $('btn-shop').classList.toggle('hidden', !open());
+  toggle(); profile.onChange(toggle);
+  if (!SHOP_OPEN && !(DEBUG && params.has('shop'))) return;
   // the app: finish purchases that were paid for but not settled (closed app, lost connection)
   if (NATIVE) profile.load().then(() => recoverPurchases(profile)).then((n) => { if (n) notice(tr('未処理だった購入を反映しました')); }).catch(() => {});
   const paint = async () => {
     const v = profile.view;
     $('shop-gems').textContent = v?.gems ? `${GEM.icon} ${v.gems.total.toLocaleString()}` : '';
     const own = new Set(v?.owned || []);
-    $('shop-items').innerHTML = SHOP_ITEMS.map((it) => `<button type="button" data-key="${it.key}" class="${own.has(it.key) ? 'owned' : ''}"><b>${escapeHtml(tr(ITEMS.find((i) => i.key === it.key)?.name || it.key))}</b><small>${own.has(it.key) ? tr('購入済み') : `${GEM.icon} ${it.price}`}</small></button>`).join('') || `<p class="note">${tr('準備中です')}</p>`;
-    $('shop-packs-box').classList.toggle('hidden', !NATIVE);
-    if (NATIVE) {
-      const packs = await gemProducts().catch(() => []);
+    $('shop-items').innerHTML = SHOP_ITEMS.map((s) => {
+      const it = ITEMS.find((i) => i.key === s.key), have = own.has(s.key);
+      if (!it) return '';
+      return `<button type="button" data-key="${s.key}" class="${have ? 'owned' : ''}"${have ? ' disabled' : ''}>${swatch(it)}<b>${escapeHtml(tr(it.name))}</b><em>${escapeHtml(tr(SLOTS.find((x) => x.k === it.slot)?.name || ''))}</em><small>${have ? tr('購入済み') : `${GEM.icon} ${s.price}`}</small></button>`;
+    }).join('') || `<p class="note">${tr('準備中です')}</p>`;
+    const demo = !NATIVE && DEBUG && params.has('shop');   // browser preview of the app's shop (screenshots)
+    $('shop-packs-box').classList.toggle('hidden', !NATIVE && !demo);
+    if (NATIVE || demo) {
+      const packs = demo ? GEM_PACKS.map((g) => ({ ...g, product: { priceString: `¥${g.jpy.toLocaleString()}` } })) : await gemProducts().catch(() => []);
       $('shop-packs').innerHTML = packs.map((g) => `<button type="button" data-pack="${g.id}"><b>${GEM.icon} ${g.gems.toLocaleString()}</b><small>${escapeHtml(g.product.priceString)}</small></button>`).join('') || `<p class="note">${tr('ストアに接続できませんでした')}</p>`;
     }
   };

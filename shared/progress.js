@@ -43,6 +43,7 @@ export const ITEMS = [
   I('paint', 'crimson', 'クリムゾン', { ach: 'wins100' }, { color: [0.55, 0.05, 0.12] }),
   I('paint', 'sakura', 'サクラ', { ach: 'daily30' }, { color: [0.98, 0.62, 0.72] }),
   I('paint', 'cadet', 'カデットミント', { ach: 'tutorial' }, { color: [0.24, 0.8, 0.66] }),
+  I('paint', 'royal', 'ロイヤルパープル', { shop: true }, { color: [0.36, 0.16, 0.62] }),
 
   I('pattern', 'none', 'なし'),
   I('pattern', 'stripe', 'レーシングストライプ', { lv: 5 }),
@@ -82,17 +83,20 @@ export const ITEMS = [
   I('glow', 'gold', 'ゴールド', { lv: 45 }, { color: [1, 0.75, 0.2] }),
   I('glow', 'emerald', 'エメラルド', { ach: 'heal50' }, { color: [0.2, 1, 0.5] }),
   I('glow', 'red', 'レッド', { ach: 'turbokill50' }, { color: [1, 0.2, 0.15] }),
+  I('glow', 'platinum', 'プラチナ', { shop: true }, { color: [0.92, 0.95, 1] }),
 
   I('trail', 'std', '標準（黄）', {}, { color: [1, 0.82, 0.25] }),
   I('trail', 'ice', 'アイス', { lv: 5 }, { color: [0.55, 0.9, 1] }),
   I('trail', 'neon', 'ネオングリーン', { lv: 35 }, { color: [0.45, 1, 0.3] }),
   I('trail', 'violet', 'バイオレット', { ach: 'long50' }, { color: [0.75, 0.4, 1] }),
   I('trail', 'rose', 'ローズ', { ach: 'multi5' }, { color: [1, 0.4, 0.6] }),
+  I('trail', 'sunset', 'サンセット', { shop: true }, { color: [1, 0.42, 0.1] }),
 
   I('spark', 'std', '標準（白）', {}, { color: [1, 1, 0.92] }),
   I('spark', 'gold', 'ゴールド', { lv: 25 }, { color: [1, 0.8, 0.3] }),
   I('spark', 'pink', 'ピンク', { lv: 35 }, { color: [1, 0.45, 0.75] }),
   I('spark', 'rainbow', 'レインボー', { ach: 'turbo300' }, { rainbow: true }),
+  I('spark', 'violet', 'バイオレット', { shop: true }, { color: [0.72, 0.42, 1] }),
 
   I('boom', 'std', '爆炎（標準）'),
   I('boom', 'plasma', 'プラズマ', { lv: 20 }),

@@ -61,6 +61,19 @@ ok(r.status === 200 && r.data.skipped === 'google_not_configured', 'Google refun
 // shop: nothing for sale yet
 r = await api('/api/profile/shop', { token: A, body: { key: 'paint:gold' } });
 ok(r.status === 400 && r.data.error === 'not_for_sale', 'shop: items that are not for sale cannot be bought with gems');
+const g0 = (await api('/api/profile', { token: A })).data.gems.total;
+r = await api('/api/profile/shop', { token: A, body: { key: 'paint:royal' } });
+ok(r.status === 200 && r.data.bought === 'paint:royal' && r.data.view.owned.includes('paint:royal') && r.data.view.gems.total === g0 - 200, `shop: bought ロイヤルパープル for 200 gems (${g0} → ${r.data?.view?.gems?.total})`);
+r = await api('/api/profile/shop', { token: A, body: { key: 'paint:royal' } });
+ok(r.status === 409, 'shop: cannot buy the same item twice');
+r = await api('/api/profile/shop', { token: B, body: { key: 'glow:platinum' } });
+ok(r.status === 402, 'shop: not enough gems');
+const lk = await api('/api/profile/look', { token: A, body: { look: { paint: 'royal' } } });
+ok(lk.data.look.paint === 'royal', 'a bought item can be worn');
+const lkB = await api('/api/profile/look', { token: B, body: { look: { paint: 'royal' } } });
+ok(lkB.data.look.paint !== 'royal', 'a player who did not buy it cannot wear it');
+r = await api('/api/admin/summary?days=7', { token: 'local-test-key' });
+ok(r.data.sales.spentPaid >= 200, `owner figures count paid gems spent: ${r.data.sales.spentPaid}`);
 // spending order: free gems first
 const s = spend({ paid: 100, free: 30 }, 50);
 ok(s.wallet.free === 0 && s.wallet.paid === 80 && s.took.free === 30 && s.took.paid === 20, 'spending uses free gems first, then paid');
