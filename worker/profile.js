@@ -42,7 +42,7 @@ export class PlayerProfile extends DurableObject {
     for (const k of this.d.bought || []) if (ITEM.has(k)) s.add(k);   // bought with gems
     return s;
   }
-  wallet() { const w = (this.d.wallet ??= { paid: 0, free: 0 }); return { paid: w.paid, free: w.free, total: w.paid + w.free }; }
+  wallet() { const w = (this.d.wallet ??= { paid: 0, free: 0 }); return { paid: w.paid, free: w.free, total: Math.max(0, w.paid + w.free) }; }
   // gem history (newest last, capped): kind = buy | spend | grant
   log(entry) { this.d.gemLog = [...(this.d.gemLog || []).slice(-199), { at: Date.now(), ...entry }]; }
 
@@ -105,6 +105,19 @@ export class PlayerProfile extends DurableObject {
       }
       return json({ credited: 0, again: true, view: this.view() });
     }
+    // a refunded purchase (worker/iap.js revokePurchase): take its gems back once
+    if (url.pathname === '/revoke') {
+      if (typeof body.key !== 'string') return json({ error: 'bad_request' }, 400);
+      const gone = (this.d.revoked ??= []);
+      if (!gone.includes(body.key)) {
+        const n = Math.max(0, Number(body.gems) || 0);
+        this.wallet(); this.d.wallet.paid -= n;
+        this.d.revoked = [...gone.slice(-199), body.key];
+        this.log({ kind: 'refund', paid: -n, ref: body.key });
+        await this.save();
+      }
+      return json({ ok: true });
+    }
     // buy a shop item with gems (free gems are spent first, see shared/shop.js)
     if (url.pathname === '/shop') {
       const it = shopItem(body.key);
@@ -117,7 +130,7 @@ export class PlayerProfile extends DurableObject {
       this.d.bought = [...(this.d.bought || []), it.key];
       this.log({ kind: 'spend', paid: -r.took.paid, free: -r.took.free, ref: it.key });
       await this.save();
-      return json({ bought: it.key, view: this.view() });
+      return json({ bought: it.key, took: r.took, view: this.view() });
     }
     if (url.pathname === '/delete') {
       await this.ctx.storage.deleteAll();

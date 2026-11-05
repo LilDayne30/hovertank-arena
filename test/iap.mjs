@@ -37,6 +37,27 @@ ok(r.status === 503 && r.data.error === 'apple_not_configured', `real transactio
 r = await api('/api/profile/iap', { body: { platform: 'ios', productId: P1.id, transactionId: `mock-${RUN}-3` } });
 ok(r.status === 401, 'no profile token: refused');
 
+// refunds: Apple notification (mock transaction) takes the gems back once; sales totals for the owner
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const jws = (o) => `${b64({ alg: 'ES256' })}.${b64(o)}.sig`;
+const before = (await api('/api/profile', { token: A })).data.gems.paid;
+const note = { signedPayload: jws({ notificationType: 'REFUND', data: { bundleId: 'com.lildayne.hovertank', signedTransactionInfo: jws({ transactionId: `mock-${RUN}-1001` }) } }) };
+r = await api('/api/iap/apple', { body: note });
+ok(r.status === 200 && r.data.gems === P1.gems, `Apple refund notification: ${JSON.stringify(r.data)}`);
+ok((await api('/api/profile', { token: A })).data.gems.paid === before - P1.gems, 'refunded gems taken back from the buyer');
+r = await api('/api/iap/apple', { body: note });
+ok(r.status === 200 && r.data.already, 'the same refund again: nothing more taken');
+r = await api('/api/iap/apple', { body: { signedPayload: jws({ notificationType: 'TEST' }) } });
+ok(r.status === 200 && r.data.ignored === 'TEST', 'other notification types are acknowledged and ignored');
+r = await api('/api/iap/apple', { body: { signedPayload: 'garbage' } });
+ok(r.status === 400, 'malformed notification refused');
+r = await api('/api/iap/apple', { body: { signedPayload: jws({ notificationType: 'REFUND', data: { signedTransactionInfo: jws({ transactionId: 'mock-never-bought' }) } }) } });
+ok(r.status === 200 && r.data.found === false, 'refund for an unknown purchase: nothing happens');
+r = await api('/api/admin/summary?days=7', { token: 'local-test-key' });
+ok(r.status === 200 && r.data.sales && r.data.sales.test.count >= 1 && r.data.sales.rows.length === 7 && 'unusedJpy' in r.data.sales, `owner dashboard has sales figures: test purchases ${r.data?.sales?.test?.count}`);
+r = await api('/api/admin/iap-check', { token: 'local-test-key', body: {} });
+ok(r.status === 200 && r.data.skipped === 'google_not_configured', 'Google refund check: skipped until the key is set');
+
 // shop: nothing for sale yet
 r = await api('/api/profile/shop', { token: A, body: { key: 'paint:gold' } });
 ok(r.status === 400 && r.data.error === 'not_for_sale', 'shop: items that are not for sale cannot be bought with gems');

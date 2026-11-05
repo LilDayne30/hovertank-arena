@@ -12,11 +12,13 @@ export const SPEND_ORDER = ['free', 'paid'];
 // Store products: consumable, same product ID on App Store Connect and Google Play.
 // Prices are set in each store (the app always shows the store's own price string).
 // gems = what one purchase gives. Changing the amount of an existing product needs a new product ID.
+// jpy = the price set in the stores for Japan (tax included). Used only for the owner's sales figures
+// and the unused-balance estimate (資金決済法); keep it equal to the store price.
 export const GEM_PACKS = [
-  { id: 'com.lildayne.hovertank.gem_pack_1', gems: 100 },
-  { id: 'com.lildayne.hovertank.gem_pack_2', gems: 550 },
-  { id: 'com.lildayne.hovertank.gem_pack_3', gems: 1200 },
-  { id: 'com.lildayne.hovertank.gem_pack_4', gems: 2600 },
+  { id: 'com.lildayne.hovertank.gem_pack_1', gems: 100, jpy: 160 },
+  { id: 'com.lildayne.hovertank.gem_pack_2', gems: 550, jpy: 800 },
+  { id: 'com.lildayne.hovertank.gem_pack_3', gems: 1200, jpy: 1600 },
+  { id: 'com.lildayne.hovertank.gem_pack_4', gems: 2600, jpy: 3200 },
 ];
 export const gemPack = (id) => GEM_PACKS.find((p) => p.id === id);
 

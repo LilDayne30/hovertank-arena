@@ -84,14 +84,127 @@ export async function verifyPurchase(env, { platform, productId, transactionId, 
   throw new IapError('bad_platform');
 }
 
+// ------------------------------------------------------------------ refunds
+// A refunded purchase takes its gems back from the profile that got them (the paid balance can go below
+// zero when the gems were already spent; later purchases fill it up first).
+//   Apple:  App Store Server Notifications V2 → POST /api/iap/apple (set this URL in App Store Connect →
+//           the app → App Information → App Store Server Notifications, production and sandbox)
+//   Google: no push needed; the voided purchases list is checked every 6 hours (Cron Trigger)
+const tryPayload = (jws) => { try { return jwsPayload(String(jws)); } catch { return null; } };
+const ledger = (env) => env.PURCHASES.get(env.PURCHASES.idFromName('global'));
+const call = async (stub, path, body) => (await stub.fetch(`https://iap${path}`, { method: 'POST', body: JSON.stringify(body || {}) })).json();
+export const ledgerCall = (env, path, body) => call(ledger(env), path, body);
+
+export async function revokePurchase(env, key, reason, profileStub) {
+  const t = await ledgerCall(env, '/find', { key });
+  if (!t.found) return { found: false };
+  if (t.revoked) return { found: true, already: true };
+  const r = await profileStub(env, t.pkey).fetch('https://profile/revoke', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, gems: t.gems }) });
+  if (!r.ok) throw new Error(`profile revoke ${r.status}`);
+  await ledgerCall(env, '/revoked', { key, reason });
+  return { found: true, gems: t.gems };
+}
+
+// Apple's notification body: { signedPayload }. Its contents are only a hint: the transaction is fetched
+// again from Apple with our key, and only a revocation Apple itself reports is acted on.
+export async function appleNotification(env, body, profileStub) {
+  const n = tryPayload(body?.signedPayload || '');
+  if (!n?.notificationType) throw new IapError('bad_request');
+  if (!['REFUND', 'REVOKE'].includes(n.notificationType)) return { ignored: n.notificationType };
+  const hint = tryPayload(n.data?.signedTransactionInfo || '');
+  if (!hint?.transactionId || (n.data?.bundleId && n.data.bundleId !== BUNDLE_ID)) throw new IapError('bad_request');
+  const id = String(hint.transactionId);
+  const t = env.IAP_MOCK === '1' && id.startsWith('mock-') ? { transactionId: id, bundleId: BUNDLE_ID, revocationDate: Date.now() } : await appleTransaction(env, id);
+  if (t.bundleId !== BUNDLE_ID || !t.revocationDate) return { ignored: 'not_revoked' };
+  return revokePurchase(env, `ios:${t.transactionId}`, `apple:${n.notificationType}`, profileStub);
+}
+
+// Google: purchases refunded / charged back / cancelled since the last check (the API keeps 30 days)
+export async function checkGoogleVoided(env, profileStub) {
+  if (!env.GOOGLE_SERVICE_ACCOUNT) return { skipped: 'google_not_configured' };
+  const at = await googleAccess(env);
+  const { since } = await ledgerCall(env, '/google-since', {});
+  const start = Math.max(since || 0, Date.now() - 29 * 864e5), now = Date.now();
+  let token = '', done = 0, seen = 0;
+  for (let page = 0; page < 20; page++) {
+    const q = new URLSearchParams({ startTime: String(start), endTime: String(now), maxResults: '1000', type: '0' });
+    if (token) q.set('token', token);
+    const r = await fetch(`https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${BUNDLE_ID}/purchases/voidedpurchases?${q}`, { headers: { authorization: `Bearer ${at}` } });
+    if (!r.ok) throw new IapError(`google_${r.status}`, 502);
+    const j = await r.json();
+    for (const v of j.voidedPurchases || []) {
+      seen++;
+      const res = await revokePurchase(env, `android:${v.orderId || String(v.purchaseToken).slice(0, 64)}`, `google:${v.voidedReason ?? ''}`, profileStub);
+      if (res.gems) done++;
+    }
+    token = j.tokenPagination?.nextPageToken || '';
+    if (!token) break;
+  }
+  await ledgerCall(env, '/google-since', { set: now - 3600e3 });   // overlap one hour; revoking twice is a no-op
+  return { seen, revoked: done };
+}
+
+// ------------------------------------------------------------------ the ledger
 // One global record of every purchase already turned into gems, so the same purchase can never be
-// redeemed twice (or by two profiles). Keeps only the hashed profile key and the product.
+// redeemed twice (or by two profiles). Keeps only the hashed profile key and the product, plus the
+// owner's totals: sales, refunds, and paid gems not used yet (資金決済法: the unused balance of paid
+// currency on 3/31 and 9/30; over ¥10M needs a filing).
+const jstDay = (t = Date.now()) => new Date(t + 9 * 3600e3).toISOString().slice(0, 10);
+const blank = () => ({ count: 0, gems: 0, jpy: 0 });
+const isTest = (e) => e !== 'Production';   // Apple: Sandbox / Xcode; Google: Test; local: Mock
+
 export class PurchaseLedger extends DurableObject {
+  async sum() { return (await this.ctx.storage.get('sum')) || { sold: blank(), test: blank(), refunded: blank(), spentPaid: 0 }; }
   async fetch(request) {
-    const { key, pkey, productId } = await request.json();
-    const k = `tx:${key}`, have = await this.ctx.storage.get(k);
-    if (have) return Response.json({ ok: have.pkey === pkey, again: true });
-    await this.ctx.storage.put(k, { pkey, productId, at: Date.now() });
-    return Response.json({ ok: true, again: false });
+    const path = new URL(request.url).pathname, body = await request.json().catch(() => ({}));
+    const st = this.ctx.storage;
+    if (path === '/claim') {
+      const { key, pkey, productId } = body;
+      const k = `tx:${key}`, have = await st.get(k);
+      if (have) return Response.json({ ok: have.pkey === pkey, again: true });
+      const gems = Number(body.gems) || 0, jpy = Number(body.jpy) || 0, test = isTest(body.env);
+      await st.put(k, { pkey, productId, gems, jpy, env: body.env || '', at: Date.now() });
+      const s = await this.sum(), b = test ? s.test : s.sold;
+      b.count++; b.gems += gems; b.jpy += jpy;
+      await st.put('sum', s);
+      if (!test) { const dk = `day:${jstDay()}`, d = (await st.get(dk)) || { count: 0, jpy: 0, refunds: 0, refundJpy: 0 }; d.count++; d.jpy += jpy; await st.put(dk, d); }
+      return Response.json({ ok: true, again: false });
+    }
+    if (path === '/find') {
+      const t = await st.get(`tx:${body.key}`);
+      return Response.json(t ? { found: true, ...t } : { found: false });
+    }
+    if (path === '/revoked') {
+      const k = `tx:${body.key}`, t = await st.get(k);
+      if (!t || t.revoked) return Response.json({ ok: !!t });
+      t.revoked = Date.now(); t.reason = String(body.reason || '').slice(0, 40);
+      await st.put(k, t);
+      const s = await this.sum();
+      if (!isTest(t.env)) {
+        s.refunded.count++; s.refunded.gems += t.gems; s.refunded.jpy += t.jpy;
+        const dk = `day:${jstDay()}`, d = (await st.get(dk)) || { count: 0, jpy: 0, refunds: 0, refundJpy: 0 }; d.refunds++; d.refundJpy += t.jpy; await st.put(dk, d);
+      } else { s.test.count--; s.test.gems -= t.gems; s.test.jpy -= t.jpy; }
+      await st.put('sum', s);
+      return Response.json({ ok: true });
+    }
+    if (path === '/spent') {   // paid gems used in the shop (any profile)
+      const s = await this.sum(); s.spentPaid += Math.max(0, Number(body.paid) || 0); await st.put('sum', s);
+      return Response.json({ ok: true });
+    }
+    if (path === '/google-since') {
+      if (body.set) await st.put('googleSince', body.set);
+      return Response.json({ since: (await st.get('googleSince')) || 0 });
+    }
+    if (path === '/summary') {
+      const s = await this.sum(), days = Math.max(1, Math.min(120, Number(body.days) || 30));
+      const rows = [];
+      for (let i = days - 1; i >= 0; i--) { const day = jstDay(Date.now() - i * 864e5); rows.push({ day, ...((await st.get(`day:${day}`)) || { count: 0, jpy: 0, refunds: 0, refundJpy: 0 }) }); }
+      // unused paid gems = bought − refunded − spent; valued at the average price paid per gem
+      const issued = s.sold.gems - s.refunded.gems;   // test purchases left out
+      const unusedGems = Math.max(0, issued - s.spentPaid);
+      const perGem = s.sold.gems ? s.sold.jpy / s.sold.gems : 0;
+      return Response.json({ ...s, rows, unusedGems, unusedJpy: Math.round(unusedGems * perGem), googleSince: (await st.get('googleSince')) || 0 });
+    }
+    return Response.json({ error: 'not found' }, { status: 404 });
   }
 }

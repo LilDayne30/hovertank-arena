@@ -23,5 +23,7 @@
   "rules": [{ "type": "Data", "globs": ["**/*.bin"], "fallthrough": true }],
   // owner's dashboard (/admin.html): SHA-256 of the admin key. The key itself is never stored here.
   "vars": { "ADMIN_KEY_HASH": "a746452ff0c0cbf7d8e64ea950c1fea7831fb2f5e011aeff7b8dc8817ffb6c48" },
+  // every 6 hours: Google Play refunds (worker/iap.js checkGoogleVoided)
+  "triggers": { "crons": ["23 */6 * * *"] },
   "observability": { "enabled": true }
 }

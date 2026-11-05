@@ -51,6 +51,7 @@ function render() {
     tile('今日の同時接続ピーク', fmt(t.peak), `昨日 ${fmt(y.peak)}`),
   ].join('');
 
+  paintSales(tile);
   const labels = rows.map((r) => md(r.day));
   const s1 = css('--series-1'), s2 = css('--series-2');
   $('lg-people').innerHTML = `<span><i style="background:${s1}"></i>開いた人</span><span><i style="background:${s2}"></i>遊んだ人</span>`;
@@ -167,6 +168,22 @@ function barChart(host, labels, values, { color, unit = '', digits = 0, xTitle, 
     });
   });
   svg.addEventListener('pointerleave', () => { tip.style.opacity = '0'; });
+}
+
+// in-app purchase figures (worker/iap.js PurchaseLedger /summary)
+function paintSales(tile) {
+  const S = data.sales, yen = (n) => `¥${fmt(n)}`;
+  if (!S) { $('sales-tiles').innerHTML = ''; $('ch-sales').innerHTML = ''; $('sales-note').textContent = '売上データを読み込めませんでした。'; return; }
+  const r = S.rows, today = r[r.length - 1] || {}, inRange = r.reduce((a, x) => a + x.jpy, 0);
+  $('sales-tiles').innerHTML = [
+    tile('今日の売上', yen(today.jpy), `${fmt(today.count)}件`),
+    tile(`${days}日間の売上`, yen(inRange), `${fmt(r.reduce((a, x) => a + x.count, 0))}件`),
+    tile('累計売上', yen(S.sold.jpy), `${fmt(S.sold.count)}件・返金 ${fmt(S.refunded.count)}件（${yen(S.refunded.jpy)}）`),
+    tile('未使用の有償ジェム', `${fmt(S.unusedGems)}個`, `約 ${yen(S.unusedJpy)}`),
+  ].join('');
+  barChart($('ch-sales'), r.map((x) => md(x.day)), r.map((x) => x.jpy), { color: css('--series-1'), fmtV: (v) => yen(v) });
+  const warn = S.unusedJpy >= 7e6 ? ' ⚠ 1,000万円に近づいています。' : '';
+  $('sales-note').textContent = `資金決済法：毎年3月31日・9月30日の時点で未使用の有償ジェムが1,000万円を超えると、財務局への届出と供託などが必要です。${warn} テスト購入 ${fmt(S.test.count)}件。Google Play の返金チェック：${S.googleSince ? new Date(S.googleSince).toLocaleString('ja-JP') + ' まで確認済み' : 'まだ（Google の鍵を設定すると6時間ごとに確認）'}`;
 }
 
 load();

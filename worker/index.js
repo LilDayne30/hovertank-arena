@@ -5,7 +5,7 @@ export { Matchmaker } from './matchmaker.js';
 export { PlayerProfile, TransferCodes } from './profile.js';
 export { GameStats } from './stats.js';
 export { PurchaseLedger } from './iap.js';
-import { verifyPurchase, IapError } from './iap.js';
+import { verifyPurchase, IapError, appleNotification, checkGoogleVoided, ledgerCall } from './iap.js';
 import { accountToken, gemPack } from '../shared/shop.js';
 import { statEvent, statsStub } from './stats.js';
 import { roomCode, phraseRoomId } from './codes.js';
@@ -84,6 +84,15 @@ export default {
     if (url.pathname.startsWith('/api/profile')) return profileApi(request, env, url.pathname.slice('/api/profile'.length), ctx);
     if (url.pathname === '/api/admin/summary') return adminSummary(request, env, url);
     if (url.pathname === '/api/admin/grant' && request.method === 'POST') return adminGrant(request, env);
+    if (url.pathname === '/api/admin/iap-check' && request.method === 'POST') {   // run the Google refund check now
+      if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
+      try { return json(await checkGoogleVoided(env, profileStub)); } catch (e) { return json({ error: e.code || e.message }, e.status || 500); }
+    }
+    // App Store Server Notifications V2 (refunds). Answer 200 once handled; anything else makes Apple retry.
+    if (url.pathname === '/api/iap/apple' && request.method === 'POST') {
+      try { return json(await appleNotification(env, await request.json().catch(() => null), profileStub)); }
+      catch (e) { console.warn('apple notification', e?.message); return json({ error: e.code || 'server' }, e instanceof IapError && e.status < 500 ? 400 : 500); }
+    }
 
     const m = url.pathname.match(/^\/api\/rooms\/([A-Za-z0-9]{4,12})(\/ws)?$/);
     if (m) {
@@ -97,6 +106,11 @@ export default {
     }
     if (url.pathname.startsWith('/api/')) return json({ error: 'not found' }, 404);
     return env.ASSETS.fetch(request);
+  },
+
+  // Cron Trigger (wrangler.jsonc): take back gems for Google Play purchases refunded since the last check
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(checkGoogleVoided(env, profileStub).then((r) => console.log('google voided', JSON.stringify(r))).catch((e) => console.warn('google voided', e?.message)));
   },
 };
 
@@ -141,15 +155,21 @@ async function profileApi(request, env, path, ctx) {
   if (path === '/reroll') return post(stub, '/reroll', { index: body.index });
   if (path === '/transfer') return post(codes, '/issue', { token });
   if (path === '/delete') return post(stub, '/delete', {});   // the player deletes their data (app store requirement)
-  if (path === '/shop') return post(stub, '/shop', { key: body.key });
+  if (path === '/shop') {
+    const r = await post(stub, '/shop', { key: body.key });
+    if (!r.ok) return r;
+    const j = await r.json();
+    if (j.took?.paid) ctx.waitUntil(ledgerCall(env, '/spent', { paid: j.took.paid }).catch(() => {}));   // owner's unused-balance figure
+    return json(j);
+  }
   // in-app purchase: check it with the store, record it globally (once), then add the gems
   if (path === '/iap') {
     if (!gemPack(body.productId)) return json({ error: 'bad_product' }, 400);
     try {
       const acct = await accountToken(pkey);
       const v = await verifyPurchase(env, body, acct);
-      const led = env.PURCHASES.get(env.PURCHASES.idFromName('global'));
-      const c = await (await led.fetch('https://iap/claim', { method: 'POST', body: JSON.stringify({ key: v.key, pkey, productId: v.productId }) })).json();
+      const pack = gemPack(v.productId);
+      const c = await ledgerCall(env, '/claim', { key: v.key, pkey, productId: v.productId, gems: pack.gems * v.quantity, jpy: pack.jpy * v.quantity, env: v.env });
       if (!c.ok) return json({ error: 'used' }, 409);
       return post(stub, '/credit', { key: v.key, productId: v.productId, quantity: v.quantity });
     } catch (e) {
@@ -180,5 +200,9 @@ async function adminGrant(request, env) {
 async function adminSummary(request, env, url) {
   if (!(await isAdmin(request, env))) return json({ error: 'unauthorized' }, 401);
   const days = url.searchParams.get('days') || '30';
-  return statsStub(env).fetch(`https://stats/summary?days=${encodeURIComponent(days)}`);
+  const [stats, sales] = await Promise.all([
+    statsStub(env).fetch(`https://stats/summary?days=${encodeURIComponent(days)}`).then((r) => r.json()),
+    ledgerCall(env, '/summary', { days }).catch(() => null),
+  ]);
+  return json({ ...stats, sales });
 }
