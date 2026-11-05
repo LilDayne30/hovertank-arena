@@ -10,7 +10,9 @@
     "test:browser": "node test/browser4.cjs",
     "build:app": "vite build && node tools/prepare-app.mjs && npx cap sync",
     "open:ios": "npx cap open ios",
-    "open:android": "npx cap open android"
+    "open:android": "npx cap open android",
+    "ios:upload": "bash tools/ios/upload.sh",
+    "android:release": "npm run build:app && cd android && ./gradlew bundleRelease"
   },
   "license": "UNLICENSED",
   "dependencies": {

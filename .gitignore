@@ -7,3 +7,4 @@ scratch/
 dist-app/
 *.jks
 *.keystore
+build/
