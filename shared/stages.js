@@ -73,7 +73,7 @@ const QUARRY = {
 };
 // jump pads: from (x,z) to a landing point (tx,tz) with an upward speed vy, repeated round the centre
 QUARRY.zones = [0, 1, 2, 3].flatMap((k) => [
-  { type: 'pad', x: -20, z: -28, r: 1.8, tx: -12, tz: -36.5, vy: 18 },   // floor -> outer terrace
+  { type: 'pad', x: -20, z: -28, r: 1.8, tx: -12, tz: -36.5, vy: 21 },   // floor -> outer terrace
   { type: 'pad', x: 11.5, z: -11.5, r: 1.4, tx: 5.8, tz: -5.8, vy: 26 },  // trench -> plateau corner
 ].map((p) => { const [x, z] = rotP(p.x, p.z, k), [tx, tz] = rotP(p.tx, p.tz, k); return { ...p, x, z, tx, tz }; }));
 
