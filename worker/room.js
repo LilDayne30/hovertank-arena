@@ -33,7 +33,7 @@ export class BattleRoom extends DurableObject {
       matchEnd: (summary) => this.awardMatch(summary),
       phase: () => this.report(),   // quick match: tell the matchmaker when the room opens / closes
       tutorialDone: (p) => this.awardTutorial(p),
-    }, { worldFor, matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
+    }, { worldFor, forceStage: env.FORCE_STAGE, matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
   }
 
   async fetch(request) {

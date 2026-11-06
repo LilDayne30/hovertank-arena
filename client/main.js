@@ -542,7 +542,7 @@ function bindRoom(r) {
     myPhrase = m.phrase ? (store.sget(`ht-phrase-${r.roomId}`) || m.phrase) : '';
     $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; }
     setStage(m.stage || 'desert');
-    if (m.stage && m.stage !== 'desert' && !m.tut) setTimeout(() => notice(tr('ステージ：{s}', { s: stageLabel(m.stage) })), 600);
+    if (m.stage && m.stage !== 'desert' && !m.tut) centerFlash(tr('ステージ：{s}', { s: stageLabel(m.stage) }), 2200, true);
     if (m.tut) enterTut(m.tut); });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
@@ -631,7 +631,7 @@ function onSnapshot(m) {
   heal.active = s.hl; heal.next = s.hn;
   if (m.gm !== undefined) applyGateMask(world, m.gm);
   switchCd = m.sw || 0;
-  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? tr('✚ 回復アイテム 出現中（{p}）', { p: tr(HEAL_PLACE[world.stage] || '中央の丘') }) : tr('✚ 回復まで {n}秒', { n: s.hn });
+  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? tr('✚ 回復アイテム 出現中（{p}）', { p: tr(HEAL_PLACE[world.stage] || '中央の丘') }) : (world.gateTimer ? tr('✚ シャッター開放・回復まで {n}秒', { n: s.hn }) : tr('✚ 回復まで {n}秒', { n: s.hn }));
   $('heal-ind').classList.toggle('on', s.hl);
   updateBoardScores(s);
 

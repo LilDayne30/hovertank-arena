@@ -39,6 +39,7 @@ export class Game {
     // stages: worldFor(id) gives a fresh world for a stage (each room has its own copy: gates change it)
     this.worldFor = opts.worldFor || null;
     this.lastStage = null;
+    this.forceStage = STAGE_IDS.includes(opts.forceStage) ? opts.forceStage : null;   // tests: env FORCE_STAGE replaces 'random'
     this.io = io;
     this.matchSeconds = opts.matchSeconds || MATCH_SECONDS;
     this.players = new Map();
@@ -327,6 +328,7 @@ export class Game {
   pickStage() {
     if (!this.worldFor) return;
     let id = this.tutorial ? 'desert' : this.rules.stage;
+    if (!STAGE_IDS.includes(id) && this.forceStage) id = this.forceStage;
     if (!STAGE_IDS.includes(id)) {
       const pool = STAGE_IDS.filter((s) => s !== this.lastStage);
       id = pool[Math.floor(Math.random() * pool.length)];

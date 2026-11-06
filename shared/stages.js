@@ -59,7 +59,7 @@ const QUARRY_Q = [
   ramp('ramp', -2.5, -26, 2.5, -8, 0, 8, '+z'),  // ramp up to the centre plateau (5 m wide, 18 m long)
   trench(4, -13, 13, -10, 2), trench(10, -13, 13, -4, 2),   // trench: an L round the plateau corner
   prop(box('rock', -24, -14, -20, -10, 2.2), 'rock_largeA'),   // rocks on the floor
-  prop(box('rock', 26, -22, 29, -18, 2.4), 'rock_largeB'),
+  prop(box('rock', 30, -14, 33, -10, 2.4), 'rock_largeB'),
   prop(box('rock', -33, -26, -30, -23, 2), 'rock_largeA'),
   prop(box('rock', 42, -47, 47, -42, 2.6), 'rock_crystalsLargeA'),   // crystals in the corner
 ];

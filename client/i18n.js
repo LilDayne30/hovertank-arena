@@ -121,6 +121,7 @@ const EN = {
   'チュートリアル': 'Tutorial', 'はじめての方へ': 'New here?',
   'あとで': 'Later', '中断': 'Quit',
   'ショップ': 'Shop', 'ジェムを買う': 'Buy gems', '購入したジェムに有効期限はありません。': 'Purchased gems never expire.', 'アイテム': 'Items', '購入済み': 'Owned', '準備中です': 'Coming soon',
+  '✚ シャッター開放・回復まで {n}秒': '✚ Shutters open (heal) in {n}s',
   'ステージ': 'Stage',
   'ランダム': 'Random',
   'ステージ：{s}': 'Stage: {s}',

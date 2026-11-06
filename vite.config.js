@@ -10,11 +10,14 @@ const precompress = () => ({
   name: 'precompress-binary-assets',
   apply: 'build',
   closeBundle() {
-    const dir = join(import.meta.dirname, 'dist', 'assets');
-    for (const f of readdirSync(dir)) {
-      if (!/\.(glb|bin)$/.test(f)) continue;
-      writeFileSync(join(dir, `${f}.gz`), gzipSync(readFileSync(join(dir, f)), { level: 9 }));
-    }
+    const walk = (dir) => {   // assets/ and its sub-folders (stage models live in assets/stages/<id>/)
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const f = join(dir, e.name);
+        if (e.isDirectory()) walk(f);
+        else if (/\.(glb|bin)$/.test(e.name)) writeFileSync(`${f}.gz`, gzipSync(readFileSync(f), { level: 9 }));
+      }
+    };
+    walk(join(import.meta.dirname, 'dist', 'assets'));
   },
 });
 
