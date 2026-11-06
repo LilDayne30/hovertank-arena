@@ -187,6 +187,8 @@ async function init() {
     onDeleted: () => clearNative(),
   });
   profile.load().catch((e) => console.warn('profile', e.message));
+  // sign in with Google / Apple (shown only once the client IDs are configured on the server)
+  import('./account-ui.js').then((m) => m.setupAccountUi({ profile, tr, lang })).catch((e) => console.warn('account', e?.message));
   // tutorial: suggested on the lobby until done (or "later"); the 🎓 button stays
   profile.onChange(paintTutLobby);
   const startTut = () => { $('tut-pop').classList.add('hidden'); start('tutorial'); };

@@ -21,7 +21,7 @@ const JA = /[぀-ヿ一-鿿]/;
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = w.nextNode(); n; n = w.nextNode()) {
       const el = n.parentElement;
-      if (!el || !n.nodeValue.trim() || !re.test(n.nodeValue) || el.closest('.lang-btn')) continue;
+      if (!el || !n.nodeValue.trim() || !re.test(n.nodeValue) || el.closest('.lang-btn') || el.closest('#g-btn')) continue;
       const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
       if (r.width && r.height && cs.visibility !== 'hidden' && el.offsetParent !== null) out.push(n.nodeValue.trim().slice(0, 60));
     }

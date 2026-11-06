@@ -11,14 +11,16 @@
     { "name": "PROFILES", "class_name": "PlayerProfile" },
     { "name": "CODES", "class_name": "TransferCodes" },
     { "name": "STATS", "class_name": "GameStats" },
-    { "name": "PURCHASES", "class_name": "PurchaseLedger" }
+    { "name": "PURCHASES", "class_name": "PurchaseLedger" },
+    { "name": "ACCOUNTS", "class_name": "Accounts" }
   ] },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["BattleRoom"] },
     { "tag": "v2", "new_sqlite_classes": ["Matchmaker"] },
     { "tag": "v3", "new_sqlite_classes": ["PlayerProfile", "TransferCodes"] },
     { "tag": "v4", "new_sqlite_classes": ["GameStats"] },
-    { "tag": "v5", "new_sqlite_classes": ["PurchaseLedger"] }
+    { "tag": "v5", "new_sqlite_classes": ["PurchaseLedger"] },
+    { "tag": "v6", "new_sqlite_classes": ["Accounts"] }
   ],
   "rules": [{ "type": "Data", "globs": ["**/*.bin"], "fallthrough": true }],
   // owner's dashboard (/admin.html): SHA-256 of the admin key. The key itself is never stored here.

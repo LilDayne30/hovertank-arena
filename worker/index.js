@@ -2,9 +2,11 @@
 // to one Durable Object per room.
 export { BattleRoom } from './room.js';
 export { Matchmaker } from './matchmaker.js';
+export { Accounts } from './auth.js';
 export { PlayerProfile, TransferCodes } from './profile.js';
 export { GameStats } from './stats.js';
 export { PurchaseLedger } from './iap.js';
+import { AuthError, verifyIdToken, nonceForms, authConfig, appleRefreshToken, appleRevoke } from './auth.js';
 import { verifyPurchase, IapError, appleNotification, checkGoogleVoided, ledgerCall } from './iap.js';
 import { accountToken, gemPack } from '../shared/shop.js';
 import { statEvent, statsStub } from './stats.js';
@@ -82,6 +84,7 @@ export default {
     }
     if (url.pathname === '/api/stats') return matchmaker(env).fetch('https://mm/stats');
     if (url.pathname.startsWith('/api/profile')) return profileApi(request, env, url.pathname.slice('/api/profile'.length), ctx);
+    if (url.pathname.startsWith('/api/auth/')) return authApi(request, env, url.pathname.slice('/api/auth/'.length), ctx);
     if (url.pathname === '/api/admin/summary') return adminSummary(request, env, url);
     if (url.pathname === '/api/admin/grant' && request.method === 'POST') return adminGrant(request, env);
     if (url.pathname === '/api/admin/iap-check' && request.method === 'POST') {   // run the Google refund check now
@@ -113,6 +116,60 @@ export default {
     ctx.waitUntil(checkGoogleVoided(env, profileStub).then((r) => console.log('google voided', JSON.stringify(r))).catch((e) => console.warn('google voided', e?.message)));
   },
 };
+
+// ------------------------------------------------------------------ sign in with Google / Apple (worker/auth.js)
+const accCall = async (env, path, body) => (await env.ACCOUNTS.get(env.ACCOUNTS.idFromName('global')).fetch(`https://acc${path}`, { method: 'POST', body: JSON.stringify(body || {}) })).json();
+async function authApi(request, env, path, ctx) {
+  if (path === 'config' && request.method === 'GET') return json(authConfig(env));
+  if (request.method !== 'POST') return json({ error: 'not found' }, 404);
+  if (path === 'nonce') return json(await accCall(env, '/nonce'));
+  const body = await request.json().catch(() => ({}));
+  const pview = async (token) => (await profileStub(env, await profileKey(token)).fetch('https://profile/view')).json();
+  const signedIn = async (token) => json({ status: 'signedin', token, profile: await pview(token) });
+  if (path === 'switch') {
+    const t = await accCall(env, '/use-ticket', { ticket: body.ticket });
+    if (!t.token) return json({ error: 'expired' }, 404);
+    return signedIn(t.token);
+  }
+  if (!['google', 'apple'].includes(path)) return json({ error: 'not found' }, 404);
+  const provider = path;
+  try {
+    const claims = await verifyIdToken(env, provider, body.idToken);
+    // one-time nonce issued by /api/auth/nonce, carried in the token (plain or hashed)
+    if (typeof body.nonce !== 'string' || !claims.nonce || !(await nonceForms(body.nonce)).includes(claims.nonce)) throw new AuthError('bad_nonce', 401);
+    if (!(await accCall(env, '/use-nonce', { raw: [body.nonce] })).ok) throw new AuthError('bad_nonce', 401);
+    const id = `${provider}:${claims.sub}`;
+    const cur = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+    const current = TOKEN_RE.test(cur) ? cur : null;
+    const rec = await accCall(env, '/find', { id });
+    const rt = provider === 'apple' ? await appleRefreshToken(env, claims.aud, body.code).catch(() => null) : null;
+    const link = async (token) => {
+      const pkey = await profileKey(token);
+      const r = await accCall(env, '/link', { id, token, pkey, aud: claims.aud, rt });
+      if (r.error) throw new AuthError(r.error, 409);
+      const links = [...new Set([...((await pview(token)).links || []), provider])];
+      return (await profileStub(env, pkey).fetch('https://profile/links', { method: 'POST', body: JSON.stringify({ links }) })).json();
+    };
+    if (rec.token) {
+      if (current && rec.pkey === await profileKey(current)) return json({ status: 'linked', view: await link(current) });
+      if (!current) return signedIn(rec.token);
+      // this device has another profile: switch right away if it has nothing worth keeping, else ask
+      const mine = await pview(current), theirs = await pview(rec.token);
+      if (!mine.xp && !mine.gems?.total && !(mine.links || []).length) return signedIn(rec.token);
+      const { ticket } = await accCall(env, '/ticket', { id, token: rec.token });
+      return json({ status: 'conflict', ticket, current: { level: mine.level, gems: mine.gems?.total || 0 }, other: { level: theirs.level, gems: theirs.gems?.total || 0 } }, 409);
+    }
+    if (current) return json({ status: 'linked', view: await link(current) });
+    const token = newToken();   // a new device with no profile yet: start one and link it
+    statEvent(env, ctx, { type: 'new' });
+    await link(token);
+    return signedIn(token);
+  } catch (e) {
+    if (e instanceof AuthError) return json({ error: e.code }, e.status);
+    console.warn('auth', e?.message);
+    return json({ error: 'server' }, 500);
+  }
+}
 
 // ------------------------------------------------------------------ progression (levels, looks, missions)
 // The device keeps a random secret token; requests carry it as "Authorization: Bearer <token>".
@@ -154,7 +211,17 @@ async function profileApi(request, env, path, ctx) {
   if (path === '/look') return post(stub, '/look', { look: body.look });
   if (path === '/reroll') return post(stub, '/reroll', { index: body.index });
   if (path === '/transfer') return post(codes, '/issue', { token });
-  if (path === '/delete') return post(stub, '/delete', {});   // the player deletes their data (app store requirement)
+  if (path === '/delete') {   // the player deletes their data (app store requirement); signed-in accounts are unlinked too
+    const { removed } = await accCall(env, '/unlink', { pkey, all: true });
+    for (const r of removed) if (r.id.startsWith('apple:') && r.rt) ctx.waitUntil(appleRevoke(env, r.aud, r.rt).catch(() => {}));
+    return post(stub, '/delete', {});
+  }
+  if (path === '/unlink') {
+    if (!['google', 'apple'].includes(body.provider)) return json({ error: 'bad_provider' }, 400);
+    const { removed, left } = await accCall(env, '/unlink', { pkey, provider: body.provider });
+    for (const r of removed) if (r.id.startsWith('apple:') && r.rt) ctx.waitUntil(appleRevoke(env, r.aud, r.rt).catch(() => {}));
+    return post(stub, '/links', { links: left });
+  }
   if (path === '/shop') {
     const r = await post(stub, '/shop', { key: body.key });
     if (!r.ok) return r;

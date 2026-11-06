@@ -556,3 +556,12 @@ body.native #btn-fullscreen, body.native #install { display: none !important; }
   #shop .note { margin: 4px 0 0; font-size: 12px; }
 }
 @media (max-width: 520px) { #shop .shop-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* sign in with Google / Apple */
+.acct-btns { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 6px 0; }
+.sso { display: inline-flex; align-items: center; gap: 10px; height: 44px; padding: 0 18px; border-radius: 22px; font: 600 15px/1 system-ui, -apple-system, "Hiragino Sans", sans-serif; cursor: pointer; }
+.sso svg { width: 18px; height: 18px; flex: none; }
+.sso.google { background: #fff; color: #1f1f1f; border: 1px solid #747775; }
+.sso.apple { background: #000; color: #fff; border: 1px solid #000; }
+.link-btn { background: none; border: 0; padding: 0 2px; color: inherit; text-decoration: underline; font-size: 13px; opacity: .8; cursor: pointer; }
+#acct-conflict { margin-top: 6px; }

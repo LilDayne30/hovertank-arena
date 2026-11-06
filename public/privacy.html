@@ -16,7 +16,7 @@
 <body>
   <nav><a href="#ja">日本語</a> ・ <a href="#en">English</a></nav>
   <h1 id="ja">プライバシーポリシー</h1>
-  <p class="meta">Hover Tank Arena（ウェブ版・Android版・iOS版）／運営者：Friend_Crow（個人開発）／制定日：2026年11月4日</p>
+  <p class="meta">Hover Tank Arena（ウェブ版・Android版・iOS版）／運営者：Friend_Crow（個人開発）／制定日：2026年11月4日／改定日：2026年11月6日（アカウント連携を追加）</p>
 
   <section>
     <h2>1. 取得する情報</h2>
@@ -24,6 +24,7 @@
       <li><strong>端末ID</strong>：初回起動時にランダムに作る識別子です。お使いの端末に保存され、サーバーではそのハッシュ値でデータを管理します。</li>
       <li><strong>プレイヤー名</strong>：任意で入力した名前です。同じ部屋のプレイヤーに表示されます。</li>
       <li><strong>プレイの記録</strong>：レベル・経験値、ミッションの進み具合、試合の成績、所持アイテム、ジェムの残高と増減の記録、選んだ見た目と装備。</li>
+      <li><strong>連携したアカウント</strong>：GoogleまたはAppleでサインインした場合、そのサービスが発行する利用者ごとの識別子（メールアドレスや名前は保存しません）。Appleの場合は、連携を解除・データを削除したときにAppleでの許可を取り消すためのトークンも保存します。サインインは任意です。</li>
       <li><strong>購入の記録</strong>：アプリ内課金をした場合の、ストアの取引ID・商品ID・日時。カード番号などの支払い情報はApple / Googleが扱い、当方には届きません。</li>
       <li><strong>利用状況の集計</strong>：日ごとの利用者数・試合数など。ハッシュ化した端末IDで重複を除いて数えます。どのリンクから来たか（リンクに付いた印）も数えます。</li>
       <li><strong>通信の情報</strong>：通信のため、IPアドレスなどがサーバー（Cloudflare）で処理されます。当方はIPアドレスを保存しません（引き継ぎコードの総当たり防止のため、一時的にメモリ上で回数を数えるのみ）。</li>
@@ -45,7 +46,7 @@
     <h2>3. 外部のサービス</h2>
     <ul>
       <li><strong>Cloudflare, Inc.</strong>：サーバーとデータの保存（<a href="https://www.cloudflare.com/privacypolicy/">プライバシーポリシー</a>）</li>
-      <li><strong>Apple Inc. / Google LLC</strong>：アプリの配信とアプリ内課金の決済。購入の確認のため、取引IDを各社のサーバーに問い合わせます。</li>
+      <li><strong>Apple Inc. / Google LLC</strong>：アプリの配信とアプリ内課金の決済。購入の確認のため、取引IDを各社のサーバーに問い合わせます。GoogleまたはAppleでサインインした場合は、各社が発行するIDトークンを検証します。</li>
     </ul>
     <p>法令に基づく場合を除き、取得した情報を第三者に提供・販売することはありません。</p>
   </section>
@@ -55,6 +56,7 @@
     <ul>
       <li>プロフィール（進み具合・アイテム・ジェム）は、削除されるまで保存します。</li>
       <li>日ごとの集計で重複を除くための記録は、120日後に自動で消します。</li>
+      <li>連携したアカウントは、ゲーム内の「引き継ぎ」→「アカウント連携」でいつでも解除できます。</li>
       <li>ゲーム内の「引き継ぎ」→「データを削除」で、いつでもこの端末のデータをサーバーから削除できます。削除すると元に戻せず、購入済みのジェム・アイテムも失われます。</li>
       <li>同じ購入が二重に付与されないよう、取引IDの使用済み記録は削除後も残ります（どのプレイヤーかは分からない形です）。</li>
     </ul>
@@ -67,13 +69,14 @@
   </section>
 
   <h1 id="en">Privacy Policy</h1>
-  <p class="meta">Hover Tank Arena (web, Android, iOS) / Operator: Friend_Crow (independent developer) / Effective: November 4, 2026</p>
+  <p class="meta">Hover Tank Arena (web, Android, iOS) / Operator: Friend_Crow (independent developer) / Effective: November 4, 2026 / Updated: November 6, 2026 (linked accounts)</p>
   <section>
     <h2>What we collect</h2>
     <ul>
       <li><strong>Device ID</strong>: a random identifier created on first launch and stored on your device; the server keeps your data under its hash.</li>
       <li><strong>Player name</strong>: optional; shown to players in the same room.</li>
       <li><strong>Game data</strong>: level, XP, missions, match results, items, gem balance and its history, chosen look and loadout.</li>
+      <li><strong>Linked accounts</strong>: if you sign in with Google or Apple, the per-user identifier that service issues (we do not store your email address or name). For Apple we also keep a token used to revoke the permission when you unlink or delete your data. Signing in is optional.</li>
       <li><strong>Purchase records</strong>: store transaction ID, product ID and date for in-app purchases. Payment details are handled by Apple / Google and never reach us.</li>
       <li><strong>Usage counts</strong>: daily numbers of players and matches, counted with the hashed device ID, and which link a visit came from.</li>
       <li><strong>Connection data</strong>: your IP address is processed by our host (Cloudflare) to deliver the service. We do not store IP addresses (we only count attempts in memory to stop transfer-code guessing).</li>

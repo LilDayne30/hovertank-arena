@@ -158,8 +158,14 @@
   </div>
 
   <div id="transfer" class="panel scrollable hidden">
-    <h2>データ引き継ぎ</h2>
-    <p class="note">レベル・アイテム・ミッションの進み具合は、この端末に保存されたIDでサーバーに記録されています（アカウント登録は不要）。機種変更するときや、iPhoneでSafariとホーム画面版の両方で遊ぶときは、引き継ぎコードで同じデータを使えます。</p>
+    <h2>アカウント・引き継ぎ</h2>
+    <p class="note">レベル・アイテム・ミッションの進み具合は、この端末に保存されたIDでサーバーに記録されています（アカウント登録なしで遊べます）。GoogleかAppleのアカウントを連携しておくと、機種変更やブラウザを変えたときも、サインインするだけで同じデータを使えます。引き継ぎコードでも移せます。</p>
+    <div class="lobby-sec hidden" id="acct-sec"><div class="sec-h">アカウント連携</div>
+      <p id="acct-status" class="note"></p>
+      <div class="acct-btns"><div id="g-btn"></div><button id="btn-google" type="button" class="sso google hidden"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.6 0 20.2 0 24s1 7.4 2.6 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.2C6.6 42.6 14.6 48 24 48z"/></svg><span>Googleで続ける</span></button><button id="btn-apple" type="button" class="sso apple hidden"><svg viewBox="0 0 17 20" aria-hidden="true"><path fill="currentColor" d="M14.2 10.6c0-2.6 2.1-3.8 2.2-3.9-1.2-1.8-3.1-2-3.7-2-1.6-.2-3.1.9-3.9.9-.8 0-2-.9-3.4-.9-1.7 0-3.3 1-4.2 2.6-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.7-1-2.7-4.1zM11.6 3c.7-.9 1.2-2 1.1-3.2-1 0-2.3.7-3 1.6-.7.8-1.2 2-1.1 3.1 1.1.1 2.3-.6 3-1.5z"/></svg><span>Appleでサインイン</span></button></div>
+      <div id="acct-conflict" class="hidden"><p id="acct-conflict-msg" class="note"></p><div class="row"><button id="btn-acct-switch" type="button">切り替える</button><button id="btn-acct-keep" type="button" class="ghost">やめる</button></div></div>
+      <p id="acct-msg" class="note" role="status"></p>
+    </div>
     <div class="lobby-sec"><div class="sec-h">この端末のデータを別の端末で使う</div><button id="btn-tr-issue" type="button">引き継ぎコードを発行</button><p id="tr-code"></p></div>
     <div class="lobby-sec"><div class="sec-h">別の端末のデータをこの端末で使う</div><div class="row"><input id="tr-input" placeholder="XXXX-XXXX" maxlength="12" autocomplete="off" autocapitalize="characters" /><button id="btn-tr-redeem" type="button">引き継ぐ</button></div><p id="tr-msg" class="note"></p></div>
     <div class="lobby-sec danger"><div class="sec-h">この端末のデータを削除する</div>

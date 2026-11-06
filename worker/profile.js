@@ -59,7 +59,7 @@ export class PlayerProfile extends DurableObject {
     return {
       level: lv.level, xp: d.xp, into: lv.into, need: lv.need,
       look: cleanLook(d.look, this.ownedSet()), owned: [...this.ownedSet()], admin: !!d.admin || undefined,
-      tut: !!d.ach.tutorial, gems: this.wallet(),
+      tut: !!d.ach.tutorial, gems: this.wallet(), links: d.links || [],
       stats: d.stats,
       ach: ACHIEVEMENTS.map((a) => ({ id: a.id, done: !!d.ach[a.id], prog: Math.min(a.target, d.stats[a.key] || 0) })),
       daily: { day: dl.day, resetAt: nextResetAt(), ids: dl.ids, prog: dl.prog, done: dl.done, rerolled: dl.rerolled, bonus: dl.bonus },
@@ -104,6 +104,12 @@ export class PlayerProfile extends DurableObject {
         return json({ credited: n, view: this.view() });
       }
       return json({ credited: 0, again: true, view: this.view() });
+    }
+    // which sign-in accounts (google / apple) are linked: kept by worker/auth.js Accounts, mirrored here for the view
+    if (url.pathname === '/links') {
+      this.d.links = (Array.isArray(body.links) ? body.links : []).filter((x) => ['google', 'apple'].includes(x));
+      await this.save();
+      return json(this.view());
     }
     // a refunded purchase (worker/iap.js revokePurchase): take its gems back once
     if (url.pathname === '/revoke') {

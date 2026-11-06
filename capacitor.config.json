@@ -4,9 +4,26 @@
   "webDir": "dist-app",
   "backgroundColor": "#2b1d12",
   "loggingBehavior": "debug",
-  "android": { "backgroundColor": "#2b1d12" },
-  "ios": { "backgroundColor": "#2b1d12", "contentInset": "never", "scrollEnabled": false },
+  "android": {
+    "backgroundColor": "#2b1d12"
+  },
+  "ios": {
+    "backgroundColor": "#2b1d12",
+    "contentInset": "never",
+    "scrollEnabled": false
+  },
   "plugins": {
-    "NativePurchases": { "autoFinishTransactions": false }
+    "NativePurchases": {
+      "autoFinishTransactions": false
+    },
+    "SocialLogin": {
+      "providers": {
+        "google": true,
+        "apple": true,
+        "facebook": false,
+        "twitter": false
+      },
+      "logLevel": 1
+    }
   }
 }
