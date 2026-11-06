@@ -2,7 +2,7 @@
 // instead of arriving over the network, so it plays by exactly the same rules as a human
 // (same speed, same shells, same cooldown). Only its decisions come from code.
 import { C, DT, heightAt, solveAim, wrapPi, clamp } from './sim.js';
-import { PIT_HALF, HEAL_POS } from './arena.js';
+import { findPath } from './stages.js';
 import { ITEMS, SLOTS, DEFAULT_LOOK, owned } from './progress.js';
 import { SIDEARMS, ULTS, ULT_MAX } from './abilities.js';
 
@@ -62,7 +62,7 @@ function freeDir(w, x, z, a, dist) {
   const h0 = heightAt(w, x, z);
   for (const d of [2.5, dist]) {
     const px = x - Math.sin(a) * d, pz = z - Math.cos(a) * d;
-    if (Math.abs(px) > PIT_HALF - 2.5 || Math.abs(pz) > PIT_HALF - 2.5) return false;
+    if (Math.abs(px) > w.halfX - 2.5 || Math.abs(pz) > w.halfZ - 2.5) return false;
     if (heightAt(w, px, pz) - h0 > C.stepMax * 0.8) return false;
   }
   return true;
@@ -171,12 +171,21 @@ export class BotBrain {
     if (game.time < me.invulnUntil && game.time < me.invulnUntil - 0.3 && this.skill < 0.8) inp.f = false;
 
     // ------------------------------------------------ where to go
+    const HEAL = w.heal;
     let goal = null, mode = 'roam';
-    if (this.wantsHeal(me, game)) { goal = { x: HEAL_POS.x, z: HEAL_POS.z }; mode = 'heal'; }
+    if (this.wantsHeal(me, game)) { goal = { x: HEAL.x, z: HEAL.z }; mode = 'heal'; }
     else if (tgt && this.vis) mode = 'fight';
     else if (this.lastSeen) { goal = this.lastSeen; mode = 'hunt'; if (Math.hypot(goal.x - t.x, goal.z - t.z) < 4) this.lastSeen = null; }
     else if (tgt) { goal = { x: tgt.x, z: tgt.z }; mode = 'hunt'; }
-    else goal = { x: HEAL_POS.x * 0 + Math.sin(this.time * 0.2) * 20, z: Math.cos(this.time * 0.2) * 20 };
+    else goal = { x: Math.sin(this.time * 0.2) * 20, z: Math.cos(this.time * 0.2) * 20 };
+
+    // stages with terraces, trenches and shutters: follow the path graph to the goal (shared/stages.js)
+    let hop = false;
+    if (goal && w.stage !== 'desert') {
+      const step = this.route(w, t, goal);
+      if (step === null) { if (mode === 'heal') { this.healGoal = false; mode = 'roam'; } goal = mode === 'roam' ? { x: Math.sin(this.time * 0.2) * 20, z: Math.cos(this.time * 0.2) * 20 } : goal; const s2 = this.route(w, t, goal); if (s2) { goal = s2; hop = !!s2.jump; } }
+      else if (step) { goal = step; hop = !!step.jump; }
+    }
 
     let dirX = 0, dirZ = 0;
     if (mode === 'fight') {
@@ -196,7 +205,8 @@ export class BotBrain {
     } else if (goal) {
       const gx = goal.x - t.x, gz = goal.z - t.z, gd = Math.hypot(gx, gz) || 1;
       dirX = gx / gd; dirZ = gz / gd;
-      if (mode === 'heal' && gd < 2) { dirX *= game.heal.active ? 0.6 : 0.1; dirZ *= game.heal.active ? 0.6 : 0.1; }   // drive over it / wait on top
+      if (mode === 'heal' && gd < 2 && !goal.wp) { dirX *= game.heal.active ? 0.6 : 0.1; dirZ *= game.heal.active ? 0.6 : 0.1; }   // drive over it / wait on top
+      if (hop && gd < 3.2 && t.grounded) inp.j = true;   // a step too high to drive up: jump it
     }
 
     // obstacle avoidance: steer to the free direction closest to the wanted one
@@ -242,7 +252,7 @@ export class BotBrain {
           // sidestep the shell
           const sx = -incoming.vz, sz = incoming.vx, sl = Math.hypot(sx, sz) || 1, side = Math.random() < 0.5 ? 1 : -1;
           inp.mx = (sx / sl) * side; inp.mz = (sz / sl) * side; inp.a = true;
-        } else if (mode === 'heal' && Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z) > 12 && sideTry(0.04)) inp.a = true;   // rush to the heal
+        } else if (mode === 'heal' && Math.hypot(w.heal.x - t.x, w.heal.z - t.z) > 12 && sideTry(0.04)) inp.a = true;   // rush to the heal
         else if (tgt && this.vis && (dist > P.pref + 14 || me.hp <= 34) && sideTry(0.02)) inp.a = true;    // close in / get away
         else if (tgt && this.vis && sideTry(0.006)) inp.a = true;                                          // random juke while strafing
       } else if (t.side === 'shield') {
@@ -250,7 +260,7 @@ export class BotBrain {
         else if (incoming && skill < 0.4 && sideTry(0.05)) inp.a = true;                               // weak CPUs just raise it early
       } else if (t.side === 'mine') {
         if (tgt && dist < 24 && sideTry(0.03)) inp.a = true;
-        else if (Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z) < 9 && sideTry(0.03)) inp.a = true;   // trap the heal hill
+        else if (Math.hypot(w.heal.x - t.x, w.heal.z - t.z) < 9 && sideTry(0.03)) inp.a = true;   // trap the heal hill
       } else if (t.side === 'bounce' && tgt && aligned && dist < P.range && (this.vis || this.lastSeen) && sideTry(0.04 + P.fire * 0.3)) inp.a = true;
     }
     if (t.ult >= ULT_MAX && tgt && !shieldUp && game.phase === 'play') {
@@ -263,13 +273,27 @@ export class BotBrain {
         return inp;
   }
 
+  // next way point towards goal on the path graph: {x, z, jump, wp} / undefined (go straight) / null (no way)
+  route(w, t, goal) {
+    const P = this.path;
+    if (!P || P.w !== w.version || P.stage !== w.stage || Math.hypot(P.gx - goal.x, P.gz - goal.z) > 4 || this.time > P.at + 1.5) {
+      const pts = findPath(w, t.x, t.z, goal.x, goal.z);
+      this.path = { w: w.version, stage: w.stage, gx: goal.x, gz: goal.z, at: this.time, pts, i: 0 };
+    }
+    const p = this.path;
+    if (p.pts === null) return null;
+    while (p.i < p.pts.length - 1 && Math.hypot(p.pts[p.i].x - t.x, p.pts[p.i].z - t.z) < 2.2) p.i++;
+    const n = p.pts[p.i];
+    return n ? { x: n.x, z: n.z, jump: n.jump, wp: true } : undefined;
+  }
+
   // go for the heal pickup? (it only works below full HP). Hurt bots go from further away, and a
   // badly hurt one also heads for the hill a few seconds before the next one appears.
   // Once decided it sticks to it (no dithering) until healed or the item is gone.
   wantsHeal(me, game) {
     const t = me.tank, H = game.heal, sk = this.skill;
     if (me.hp >= 100 || (!H.active && H.nextAt - game.time > 2 + sk * 4)) { this.healGoal = false; return false; }
-    const d = Math.hypot(HEAL_POS.x - t.x, HEAL_POS.z - t.z);
+    const d = Math.hypot(game.world.heal.x - t.x, game.world.heal.z - t.z);
     if (this.healGoal) return true;
     const want = H.active
       ? me.hp <= 40 || (me.hp <= 70 && d < 28 + sk * 30) || d < 10 + sk * 8

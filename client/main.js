@@ -4,10 +4,12 @@ import {
   C, DT, makeWorld, heightAt, newTank, stepTank, muzzle, stepShell, segmentHitsTank, wrapPi, clamp, solveAim, projectile, SHELL_KINDS,
 } from '../shared/sim.js';
 import { SIDEARMS, ULTS, SIDE, ULT, ULT_MAX, cleanLoadout } from '../shared/abilities.js';
-import { PLAYER_COLORS, RECONNECT_SECONDS, applyObstacles, PIT_HALF, HEAL_POS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, normPhrase, BOT_LEVEL_NAMES } from '../shared/arena.js';
+import { PLAYER_COLORS, RECONNECT_SECONDS, TEAM_NAMES, TEAM_COLORS, DEFAULT_RULES, KILL_TARGETS, cleanRules, normPhrase, BOT_LEVEL_NAMES } from '../shared/arena.js';
 import { Input } from './input.js';
 import { Fx } from './fx.js';
 import { buildStage } from './stage.js';
+import { buildDataStage } from './stage-data.js';
+import { buildStageWorld, applyGateMask, KINDS, STAGE_LIST } from '../shared/stages.js';
 import { setupPwa } from './pwa.js';
 import { Looks, emblemSvg } from './looks.js';
 import { Profile } from './profile.js';
@@ -38,6 +40,38 @@ const store = {
 
 // ------------------------------------------------------------------ globals
 let app, device, world, tankAsset, camera, root, fx, looks, profile, pui;
+// stages (shared/stages.js): one world + visuals per stage, built the first time it is needed
+let desertBase = null, sunLight = null, stageVis = null, switchCd = 0;
+const stages = {}, stageLook = {};
+function setStage(id) {
+  if (!id || world?.stage === id && stages[id]) return;
+  for (const k of Object.keys(stages)) stages[k].root.enabled = false;
+  if (!stages[id]) {
+    const w = buildStageWorld(id, desertBase);
+    const v = buildDataStage(app, w, KINDS, (url) => loadContainer(`${import.meta.env.BASE_URL}${url}`));
+    root.addChild(v.root);
+    stages[id] = { world: w, root: v.root, update: v.update };
+    if (DEBUG) console.log(`stage ${id}: ${v.tris} triangles`);
+  }
+  const S = stages[id];
+  S.root.enabled = true;
+  world = S.world; stageVis = S;
+  if (DEBUG) window.__ht.world = world;
+  // sky and light
+  const L = stageLook[id] || STAGE_LOOKS[id];
+  if (L) {
+    camera.camera.clearColor = L.sky instanceof pc.Color ? L.sky : new pc.Color(...L.sky);
+    app.scene.ambientLight = L.ambient instanceof pc.Color ? L.ambient : new pc.Color(...L.ambient);
+    sunLight.light.color = L.sun instanceof pc.Color ? L.sun : new pc.Color(...L.sun);
+  }
+  heal.e?.setPosition(world.heal.x, world.heal.y + 1.4, world.heal.z);
+}
+const STAGE_LOOKS = {
+  quarry: { sky: [0.1, 0.12, 0.2], ambient: [0.42, 0.44, 0.52], sun: [0.95, 0.96, 1] },
+  foundry: { sky: [0.06, 0.07, 0.1], ambient: [0.36, 0.37, 0.42], sun: [1, 0.92, 0.82] },
+};
+const stageLabel = (id) => { const s = STAGE_LIST.find((x) => x.id === id); return s ? (lang === 'en' ? s.en : s.name) : ''; };
+const HEAL_PLACE = { desert: '中央の丘', quarry: '中央の台地', foundry: '中央の金庫室' };
 const preview = { look: null, yaw: 0.6, v: null };
 const sound = new Sound();
 // hit stop: on a kill the picture freezes for a split second (tanks, camera, effects), then catches up.
@@ -268,13 +302,18 @@ async function setupEngine() {
     fetch(`${base}assets/arena_hf.json`).then((r) => r.json()),
     fetchBinary(`${base}assets/arena_hf.bin`),
   ]);
-  world = makeWorld(meta, new Float32Array(hf));
-  const cover = applyObstacles(world);
+  desertBase = { meta, heights: hf };
+  world = buildStageWorld('desert', desertBase);
   const [arena, tank] = await Promise.all([loadContainer(`${base}assets/arena.glb`), loadContainer(`${base}assets/tank.glb`)]);
   tankAsset = tank;
   looks = new Looks(app, device, tank);
-  root.addChild(arena.resource.instantiateRenderEntity());
-  buildStage(app, root, cover);
+  const desertRoot = new pc.Entity('stage-desert');
+  desertRoot.addChild(arena.resource.instantiateRenderEntity());
+  buildStage(app, desertRoot, world.cover);
+  root.addChild(desertRoot);
+  stages.desert = { world, root: desertRoot, update: null };
+  stageLook.desert = { sky: camera.camera.clearColor.clone(), ambient: app.scene.ambientLight.clone(), sun: sun.light.color.clone() };
+  sunLight = sun;
   makeMaterials();
   makeHealPickup();
   fx.flash(0, -60, 0, [1, 1, 1], 0.001, 0.05);   // compile the flash-light shader variants now, not on the first kill
@@ -502,10 +541,13 @@ function bindRoom(r) {
     myId = m.id; mySlot = m.slot; myTeam = m.team ?? 0; phase = m.phase; publicRoom = !!m.public;
     myPhrase = m.phrase ? (store.sget(`ht-phrase-${r.roomId}`) || m.phrase) : '';
     $('btn-invite').textContent = tr(myPhrase ? '合言葉' : '招待'); if (m.rules) setRules(m.rules); if (m.reconnected) { local.spawnId = -1; }
+    setStage(m.stage || 'desert');
+    if (m.stage && m.stage !== 'desert' && !m.tut) setTimeout(() => notice(tr('ステージ：{s}', { s: stageLabel(m.stage) })), 600);
     if (m.tut) enterTut(m.tut); });
   r.onMessage('roster', (msg) => {
     const list = Array.isArray(msg) ? msg : msg.players;
     if (msg.rules) setRules(msg.rules);
+    if (msg.stage) setStage(msg.stage);
     const seen = new Set();
     for (const p of list) { p.look = { ...DEFAULT_LOOK, ...(p.look || {}) }; p.key = `${p.slot}|${JSON.stringify(p.look)}`; roster.set(p.id, p); seen.add(p.id); }
     for (const id of [...roster.keys()]) if (!seen.has(id)) { roster.delete(id); removeTank(id); }
@@ -569,7 +611,9 @@ function onSnapshot(m) {
       $('result').classList.add('hidden'); $('settings').classList.add('hidden');
       local.spawnId = -1;
     }
-    if (e.t === 'healspawn') notice(tr('中央の丘に回復アイテムが出現！'));
+    if (e.t === 'healspawn') notice(tr('{p}に回復アイテムが出現！', { p: tr(HEAL_PLACE[world.stage] || '中央の丘') }));
+    if (e.t === 'stage') { setStage(e.id); centerFlash(tr('ステージ：{s}', { s: stageLabel(e.id) }), 2200, true); local.spawnId = -1; }
+    if (e.t === 'switch') { notice(tr('{n} がスイッチを撃った！ シャッターが開く', { n: escapeHtml(nameOf(e.o)) })); sound.horn?.(); }
     if (e.t === 'ready' && e.v !== myId) notice(tr('{n} が準備OK', { n: escapeHtml(nameOf(e.v)) }));
     if (e.t === 'rules') { notice(tr('{n} が次の試合のルールを変更しました（{r}）', { n: escapeHtml(nameOf(e.by)), r: rulesLabelT(e.rules) })); }
     if (e.t === 'start') centerFlash(tr('次の試合スタート！'), 1400, true);
@@ -585,7 +629,9 @@ function onSnapshot(m) {
   $('teamscore').classList.toggle('hidden', rules.mode !== 'team');
   if (rules.mode === 'team') $('teamscore').innerHTML = `<span style="color:${rgb(TEAM_COLORS[0])}">${TEAM_NAMES[0]} ${teamKills[0]}</span> − <span style="color:${rgb(TEAM_COLORS[1])}">${teamKills[1]} ${TEAM_NAMES[1]}</span>`;
   heal.active = s.hl; heal.next = s.hn;
-  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? tr('✚ 回復アイテム 出現中（中央の丘）') : tr('✚ 回復まで {n}秒', { n: s.hn });
+  if (m.gm !== undefined) applyGateMask(world, m.gm);
+  switchCd = m.sw || 0;
+  $('heal-ind').textContent = s.ph !== 'play' ? '' : s.hl ? tr('✚ 回復アイテム 出現中（{p}）', { p: tr(HEAL_PLACE[world.stage] || '中央の丘') }) : tr('✚ 回復まで {n}秒', { n: s.hn });
   $('heal-ind').classList.toggle('on', s.hl);
   updateBoardScores(s);
 
@@ -639,6 +685,8 @@ function update(dt) {
     fx.update(dt); return;
   }
 
+  // stage parts that move: shutters (state from the snapshots), belts, switch lights
+  if (stageVis?.update) stageVis.update(dt, { switchCd, warn: world.gateTimer && heal.next > 0 && heal.next <= 3 });
   const [lx, ly] = input.takeLook();
   camYaw = wrapPi(camYaw - lx);
   camPitch = clamp(camPitch - ly, -0.55, 0.62);
@@ -799,7 +847,7 @@ function makeHealPickup() {
   beam.setLocalScale(0.35, 30, 0.35);
   beam.setLocalPosition(0, 15, 0);
   g.addChild(beam);
-  g.setPosition(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
+  g.setPosition(world.heal.x, world.heal.y + 1.4, world.heal.z);
   g.enabled = false;
   root.addChild(g);
   heal.e = g; heal.cross = cross; heal.ring = ring;
@@ -821,7 +869,7 @@ function updateHealPickup() {
   heal.ring.setLocalScale(s, 0.15, s);
   // screen label so players can find it from anywhere
   const p = new pc.Vec3(), w = app.graphicsDevice.clientRect?.width || innerWidth, h = app.graphicsDevice.clientRect?.height || innerHeight;
-  camera.camera.worldToScreen(new pc.Vec3(HEAL_POS.x, HEAL_POS.y + 3.4, HEAL_POS.z), p);
+  camera.camera.worldToScreen(new pc.Vec3(world.heal.x, world.heal.y + 3.4, world.heal.z), p);
   if (p.z > 0 && p.x > 0 && p.y > 0 && p.x < w && p.y < h) { heal.tag.style.display = 'block'; heal.tag.style.left = `${p.x}px`; heal.tag.style.top = `${p.y}px`; }
 }
 
@@ -1063,10 +1111,10 @@ function flushEvents(rt) {
       if (e.o === myId) killLocalShell(e.q, false);
     } else if (e.t === 'shield') { fx.shieldSpark(e.x, e.y, e.z); sound.shield(e); if (e.o === myId) killLocalShell(e.q, false); }
     else if (e.t === 'block') { fx.shieldSpark(e.x, e.y, e.z); sound.shield(e); if (e.o === myId) killLocalShell(e.q, false); const v = tanks.get(e.v); if (v) v.flash = 0.25; }
-    else if (e.t === 'healspawn') { fx.healSpawn(HEAL_POS.x, HEAL_POS.y, HEAL_POS.z); sound.healSpawn(); }
+    else if (e.t === 'healspawn') { fx.healSpawn(world.heal.x, world.heal.y, world.heal.z); sound.healSpawn(); }
     else if (e.t === 'heal') {
-      fx.healBurst(HEAL_POS.x, HEAL_POS.y + 1.4, HEAL_POS.z);
-      sound.heal(HEAL_POS, e.v === myId);
+      fx.healBurst(world.heal.x, world.heal.y + 1.4, world.heal.z);
+      sound.heal(world.heal, e.v === myId);
       const v = tanks.get(e.v); if (v) v.healFlash = 1;
       if (e.v !== myId) notice(tr('{n} が回復した', { n: escapeHtml(nameOf(e.v)) }));
     } else if (e.t === 'boost') {
@@ -1162,6 +1210,7 @@ function tankFx(dt) {
 
 // ------------------------------------------------------------------ camera & aim
 function updateCamera(dt) {
+  if (DEBUG && window.__ht.camAt) { const [x, y, z, tx, ty, tz] = window.__ht.camAt; camera.setPosition(x, y, z); camera.lookAt(tx, ty, tz); return; }   // screenshots
   const v = tanks.get(myId);
   let px, py, pz;
   if (local.alive && v) { px = v.pos.x; py = v.pos.y; pz = v.pos.z; }
@@ -1176,7 +1225,7 @@ function updateCamera(dt) {
     let want = CAM_DIST;
     for (let d = 0.5; d <= CAM_DIST; d += 0.25) {
       const x = pivot.x - fx0 * d, y = pivot.y - fy * d + CAM_LIFT * (d / CAM_DIST), z = pivot.z - fz0 * d;
-      if (heightAt(world, x, z) + 0.45 > y || Math.abs(x) > PIT_HALF + 3 || Math.abs(z) > PIT_HALF + 3) { want = Math.max(1.2, d - 0.4); break; }
+      if (heightAt(world, x, z) + 0.45 > y || Math.abs(x) > world.halfX + 3 || Math.abs(z) > world.halfZ + 3) { want = Math.max(1.2, d - 0.4); break; }
     }
     camDistNow = want < camDistNow ? want : pc.math.lerp(camDistNow, want, 1 - Math.exp(-4 * dt));
     const d = camDistNow;
@@ -1223,7 +1272,7 @@ function garagePreview(dt, centred = false) {
   // auto-spin, plus the fling left over from a drag (lobby)
   if (!preview.held) { preview.spin = (preview.spin || 0) * Math.exp(-3 * dt); preview.yaw += dt * 0.45 + (preview.spin || 0) * dt; }
   const t = performance.now() / 1000;
-  const y = HEAL_POS.y + C.hoverHeight;
+  const y = stages.desert.world.heal.y + C.hoverHeight;
   placeTank(v, 0, y, 0, preview.yaw, preview.yaw + Math.sin(t * 0.7) * 0.5, 0, 0, true, false, t);
   tankFx(dt);
   garageCamera(dt, v.pos, true, centred);
@@ -1246,7 +1295,7 @@ function garageCamera(dt, pos, fixed, centred = false) {
 
 function lobbyCamera() {
   const t = performance.now() / 1000 * 0.08;
-  camera.setPosition(Math.sin(t) * PIT_HALF * 1.1, 26, Math.cos(t) * PIT_HALF * 1.1);
+  camera.setPosition(Math.sin(t) * world.halfX * 1.1, 26, Math.cos(t) * world.halfZ * 1.1);
   camera.lookAt(0, 2, 0);
 }
 
@@ -1363,7 +1412,8 @@ function rulesPicker(el, initial, onChange) {
     <div class="row"><span class="lbl">${tr('勝利条件')}</span><button data-k="goal" data-v="time" type="button">${tr('5分間で多く倒す')}</button><button data-k="goal" data-v="kills" type="button">${tr('先に')}</button>
       <select data-k="target">${KILL_TARGETS.map((n) => `<option value="${n}">${n}</option>`).join('')}</select><span class="lbl2">${tr('キル')}</span></div>
     <div class="row"><span class="lbl">CPU</span>${[0, 1, 2, 3].map((n) => `<button data-k="bots" data-v="${n}" type="button">${n ? tr('{n}体', { n }) : tr('なし')}</button>`).join('')}</div>
-    <div class="row cpu-lv"><span class="lbl">${tr('CPUの強さ')}</span><button data-k="botLevel" data-v="easy" type="button">${tr('よわい')}</button><button data-k="botLevel" data-v="normal" type="button">${tr('ふつう')}</button><button data-k="botLevel" data-v="hard" type="button">${tr('つよい')}</button></div>`;
+    <div class="row cpu-lv"><span class="lbl">${tr('CPUの強さ')}</span><button data-k="botLevel" data-v="easy" type="button">${tr('よわい')}</button><button data-k="botLevel" data-v="normal" type="button">${tr('ふつう')}</button><button data-k="botLevel" data-v="hard" type="button">${tr('つよい')}</button></div>
+    <div class="row stage-row"><span class="lbl">${tr('ステージ')}</span><button data-k="stage" data-v="random" type="button">${tr('ランダム')}</button>${STAGE_LIST.map((st) => `<button data-k="stage" data-v="${st.id}" type="button">${escapeHtml(stageLabel(st.id))}</button>`).join('')}</div>`;
   const paint = () => {
     el.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(String(cur[b.dataset.k]) === b.dataset.v)));
     el.querySelector('.cpu-lv').classList.toggle('hidden', !cur.bots);   // strength only matters with CPUs

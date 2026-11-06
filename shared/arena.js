@@ -102,7 +102,9 @@ export const TEAM_SPAWNS = [
 // ---------------------------------------------------------------- rules
 // mode: 'ffa' (everyone for themselves) | 'team' (2 teams, no friendly fire)
 // goal: 'time' (most kills after MATCH_SECONDS) | 'kills' (first player/team to `target` kills)
-export const DEFAULT_RULES = { mode: 'ffa', goal: 'time', target: 10, bots: 0, botLevel: 'normal', size: 4 };
+export const DEFAULT_RULES = { mode: 'ffa', goal: 'time', target: 10, bots: 0, botLevel: 'normal', size: 4, stage: 'random' };
+// stage: 'random' (a different one every match) or a stage id (shared/stages.js)
+const STAGE_CHOICES = ['random', 'desert', 'quarry', 'foundry'];
 export const QM_SIZES = [2, 3, 4];     // quick match: how many tanks fight (team battle is always 2 v 2)
 export const BOT_LEVEL_NAMES = { easy: 'よわい', normal: 'ふつう', hard: 'つよい' };
 export const KILL_TARGETS = [5, 10, 15, 20];
@@ -116,6 +118,7 @@ export function cleanRules(r) {
     bots: Math.max(0, Math.min(3, Math.floor(Number(r.bots) || 0))),
     botLevel: BOT_LEVEL_NAMES[r.botLevel] ? r.botLevel : 'normal',
     size: r.mode === 'team' ? 4 : QM_SIZES.includes(Number(r.size)) ? Number(r.size) : 4,
+    stage: STAGE_CHOICES.includes(r.stage) ? r.stage : 'random',
   };
 }
 // quick-match rooms: "個人戦・3人・5分間" (no CPU settings there)

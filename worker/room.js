@@ -1,17 +1,17 @@
 // One Durable Object = one match room (max 4 players). Owns the WebSockets, seat tokens and the
 // 30 Hz game loop; all game rules live in shared/game.js.
 import { DurableObject } from 'cloudflare:workers';
-import { makeWorld } from '../shared/sim.js';
-import { SPAWNS, MAX_PLAYERS, RECONNECT_SECONDS, applyObstacles, cleanRules } from '../shared/arena.js';
+import { MAX_PLAYERS, RECONNECT_SECONDS, cleanRules } from '../shared/arena.js';
+import { buildStageWorld } from '../shared/stages.js';
 import { Game } from '../shared/game.js';
 import { TOKEN_RE, profileKey, profileStub } from './profile.js';
 import { statEvent } from './stats.js';
 import meta from '../public/assets/arena_hf.json';
 import heights from '../public/assets/arena_hf.bin';
 
-const world = makeWorld(meta, new Float32Array(heights));
-world.spawns = SPAWNS;
-applyObstacles(world);   // cover objects are part of the collision heightfield
+// every room gets its own copy of a stage's world (shutters change the heights while a match runs)
+const BASE = { meta, heights };
+const worldFor = (id) => buildStageWorld(id, BASE);
 const CLEANUP_MS = 30 * 60 * 1000;   // forget an empty room after 30 min
 
 const rand = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(36).padStart(2, '0')).join('').slice(0, n * 2);
@@ -27,13 +27,13 @@ export class BattleRoom extends DurableObject {
     this.holds = new Map();     // playerId -> timeout handle (seat kept for reconnection)
     this.loop = null;
     this.lockstep = !!env.LOCKSTEP;   // dev/recording only: the game advances only as the player's inputs arrive
-    this.game = new Game(world, {
+    this.game = new Game(worldFor('desert'), {
       send: (id, type, data) => this.sendTo(id, type, data),
       broadcast: (type, data) => this.broadcast(type, data),
       matchEnd: (summary) => this.awardMatch(summary),
       phase: () => this.report(),   // quick match: tell the matchmaker when the room opens / closes
       tutorialDone: (p) => this.awardTutorial(p),
-    }, { matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
+    }, { worldFor, matchSeconds: Number(env.MATCH_SECONDS) || undefined, healInterval: Number(env.HEAL_SECONDS) || undefined, ultRate: Number(env.ULT_RATE) || undefined });
   }
 
   async fetch(request) {
@@ -42,11 +42,11 @@ export class BattleRoom extends DurableObject {
     if (this.created === undefined) {
       this.created = !!(await this.ctx.storage.get('created'));
       const saved = await this.ctx.storage.get('rules');
-      if (saved && this.game.size === 0) this.game.setRules(saved);
       this.public = !!(await this.ctx.storage.get('public'));
       this.phrase = (await this.ctx.storage.get('phrase')) || null;
       this.game.autoFill = this.public;   // quick-match rooms: empty seats are filled with CPU players
       this.game.tutorial = !!(await this.ctx.storage.get('tutorial'));
+      if (saved && this.game.size === 0) this.game.setRules(saved);
     }
 
     if (url.pathname === '/init') {

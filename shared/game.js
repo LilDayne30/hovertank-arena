@@ -4,7 +4,8 @@ import {
   C, DT, newTank, stepTank, cleanInput, muzzle, stepShell, segmentHitsTank, separateTanks, heightAt, depenetrate, projectile, SHELL_KINDS,
 } from './sim.js';
 import { SIDE, ULT, ULT_MAX, ULT_GAIN, DEFAULT_LOADOUT, cleanLoadout, SIDEARMS, ULTS } from './abilities.js';
-import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, HEAL_POS, TEAM_SPAWNS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
+import { MATCH_SECONDS, RESULT_SECONDS, MAX_PLAYERS, HEAL_INTERVAL, HEAL_RADIUS, DEFAULT_RULES, KILLS_TIME_CAP, cleanRules } from './arena.js';
+import { STAGE_IDS, gateTimerOpen, setGate, gateMask, ensureStage } from './stages.js';
 import { BotBrain, DummyBrain, BOT_NAMES, QM_NAMES, randomLook, skillForLevel, randomLoadout } from './bot.js';
 import { TUT_STEPS, TUT_PLAYER, TUT_TARGETS, TUT_TARGET_NAMES } from './tutorial.js';
 import { isBadName } from './ngwords.js';
@@ -34,7 +35,10 @@ export class Game {
    * @param io { send(id, type, data), broadcast(type, data) }
    */
   constructor(world, io, opts = {}) {
-    this.world = world;
+    this.world = ensureStage(world);
+    // stages: worldFor(id) gives a fresh world for a stage (each room has its own copy: gates change it)
+    this.worldFor = opts.worldFor || null;
+    this.lastStage = null;
     this.io = io;
     this.matchSeconds = opts.matchSeconds || MATCH_SECONDS;
     this.players = new Map();
@@ -62,6 +66,8 @@ export class Game {
     this.botSeq = 0;
     // tutorial room: two targets that never shoot, no time limit, steps checked here (shared/tutorial.js)
     this.tutorial = !!opts.tutorial;
+    this.switchUntil = []; this.switchReadyAt = 0;
+    if (this.worldFor && !this.autoFill) this.pickStage();
   }
 
   // seats in this room: quick-match rooms use the chosen size, invite rooms always 4
@@ -195,7 +201,12 @@ export class Game {
   }
 
   get teamMode() { return this.rules.mode === 'team'; }
-  setRules(r) { this.rules = cleanRules(r); if (this.teamMode) this.balanceTeams(); this.syncBots?.(); }
+  setRules(r) {
+    this.rules = cleanRules(r);
+    if (this.teamMode) this.balanceTeams();
+    this.syncBots?.();
+    if (!this.players.size && !this.autoFill) this.pickStage();   // a new private room starts on its stage
+  }
 
   // colour index: free-for-all = seat; teams = red/orange vs blue/cyan
   colorOf(p) {
@@ -277,7 +288,7 @@ export class Game {
 
   welcome(id, extra = {}) {
     const p = this.players.get(id);
-    return { id: p.id, slot: this.colorOf(p), team: p.team, tick: this.tick, phase: this.phase, rules: this.rules, tut: this.tutorial ? this.tutState(p) : undefined, ...extra };
+    return { id: p.id, slot: this.colorOf(p), team: p.team, tick: this.tick, phase: this.phase, rules: this.rules, stage: this.world.stage, tut: this.tutorial ? this.tutState(p) : undefined, ...extra };
   }
 
   onInput(id, batch) {
@@ -312,13 +323,72 @@ export class Game {
     if (p) { p.name = sanitizeName(name) || p.name; this.sendRoster(); }
   }
 
+  // the stage of the next match: the one in the rules, or a random one different from the last
+  pickStage() {
+    if (!this.worldFor) return;
+    let id = this.tutorial ? 'desert' : this.rules.stage;
+    if (!STAGE_IDS.includes(id)) {
+      const pool = STAGE_IDS.filter((s) => s !== this.lastStage);
+      id = pool[Math.floor(Math.random() * pool.length)];
+    }
+    this.lastStage = id;
+    if (this.world.stage !== id) {
+      this.world = ensureStage(this.worldFor(id));
+      this.queuedEvents = this.queuedEvents.filter((e) => e.t !== 'stage');   // only the latest change matters
+      this.queuedEvents.push({ t: 'stage', id });
+    }
+    for (let i = 0; i < this.world.gates.length; i++) setGate(this.world, i, false);
+    this.switchUntil = this.world.gates.map(() => 0); this.switchReadyAt = 0;
+    this.heal = { active: false, nextAt: this.firstHealAt() };
+  }
+  firstHealAt() {
+    const w = this.world;
+    if (w.gateTimer) return this.time + w.gateTimer.first;   // foundry: the heal comes with the shutters
+    return this.time + (w.healFirst ?? this.healInterval);
+  }
+  nextHealAt() {
+    const w = this.world, T = w.gateTimer;
+    if (!T) return this.time + this.healInterval;
+    const since = this.time - this.matchStart - T.first;   // next time the shutters open
+    return this.matchStart + T.first + (Math.floor(Math.max(0, since) / T.every) + 1) * T.every;
+  }
+  // shutters: open on the timer, or for a few seconds after a switch is shot; they never close on a tank
+  stepGates(alive, events) {
+    const w = this.world;
+    if (!w.gates.length) return;
+    const t = this.phase === 'play' ? this.time - this.matchStart : -1;
+    let changed = false;
+    w.gates.forEach((g, i) => {
+      let open = (t >= 0 && gateTimerOpen(w, t)) || this.time < this.switchUntil[i];
+      if (!open && g.open && alive.some((p) => p.tank.x > g.x0 - 1.8 && p.tank.x < g.x1 + 1.8 && p.tank.z > g.z0 - 1.8 && p.tank.z < g.z1 + 1.8)) open = true;
+      if (setGate(w, i, open)) changed = true;
+    });
+    if (changed) { events.push({ t: 'gate', m: gateMask(w) }); for (const p of alive) depenetrate(p.tank, w); }
+  }
+  // a shot hit a switch: open the shutter(s) on that side for a few seconds (one switch every 20 s)
+  hitSwitch(s, events) {
+    const w = this.world;
+    for (let i = 0; i < w.switches.length; i++) {
+      const sw = w.switches[i];
+      if ((s.x - sw.x) ** 2 + (s.y - sw.y) ** 2 + (s.z - sw.z) ** 2 > (sw.r + 0.4) ** 2) continue;
+      if (this.phase === 'play' && this.time >= this.switchReadyAt) {
+        this.switchReadyAt = this.time + w.switchCooldown;
+        w.gates.forEach((g, gi) => { if (g.side === sw.side) this.switchUntil[gi] = this.time + w.switchOpen; });
+        events.push({ t: 'switch', i, o: s.owner, r: w.switchCooldown });
+      } else events.push({ t: 'switchno', i });
+      return true;
+    }
+    return false;
+  }
+
   resetMatch() {
+    this.pickStage();
     this.phase = 'play';
     this.winner = null;
     this.phaseEnds = this.tutorial ? Infinity : this.time + (this.rules.goal === 'kills' ? KILLS_TIME_CAP : this.matchSeconds);
     this.shells.length = 0;
-    this.heal = { active: false, nextAt: this.time + this.healInterval };
     this.matchStart = this.time;
+    this.heal = { active: false, nextAt: this.firstHealAt() };
     this.matchNo++;
     this.mines.length = 0; this.strikes.length = 0;
     for (const p of this.players.values()) { p.kills = 0; p.deaths = 0; p.ready = false; p.m = freshStats(); p.joinedAt = this.time; if (p.tank) p.tank.ult = 0; this.spawn(p); }
@@ -401,7 +471,7 @@ export class Game {
   }
 
   step() {
-    const w = this.world;
+    let w = this.world;
     this.tick++;
     this.time += DT;
     let events = this.queuedEvents;
@@ -415,6 +485,7 @@ export class Game {
       } else {
         this.beginMatch();
       }
+      w = this.world;   // a new match may be on another stage
     }
 
     for (const p of this.players.values()) if (p.bot && p.alive) p.queue.push(p.bot.think(p, this));
@@ -460,6 +531,7 @@ export class Game {
     const alive = [...this.players.values()].filter((p) => p.alive && p.connected);
     for (let a = 0; a < alive.length; a++) for (let b = a + 1; b < alive.length; b++) separateTanks(alive[a].tank, alive[b].tank);
     for (const p of alive) depenetrate(p.tank, w);   // a shove must never leave a tank inside a wall
+    this.stepGates(alive, events);
 
     // heal pickup on the hill top
     if (this.phase === 'play') {
@@ -468,10 +540,10 @@ export class Game {
         for (const p of alive) {
           const t = p.tank;
           if (p.hp >= C.maxHp) continue;           // full HP tanks leave it for someone who needs it
-          if (Math.hypot(t.x - HEAL_POS.x, t.z - HEAL_POS.z) > HEAL_RADIUS || Math.abs(t.y - C.hoverHeight - HEAL_POS.y) > 2.5) continue;
+          if (Math.hypot(t.x - w.heal.x, t.z - w.heal.z) > HEAL_RADIUS || Math.abs(t.y - C.hoverHeight - w.heal.y) > 2.5) continue;
           p.hp = C.maxHp;
           p.m.heals++;
-          this.heal = { active: false, nextAt: this.time + this.healInterval };
+          this.heal = { active: false, nextAt: this.nextHealAt() };
           events.push({ t: 'heal', v: p.id });
           break;
         }
@@ -483,6 +555,7 @@ export class Game {
       const { hitGround, bounced } = stepShell(s, w);
       if (bounced) events.push({ t: 'rico', s: s.id, o: s.owner, q: s.seq, x: r2(s.x), y: r2(s.y), z: r2(s.z) });
       let dead = hitGround || s.life <= 0;
+      if (!dead && w.switches.length && this.hitSwitch(s, events)) { dead = true; events.push({ t: 'boom', s: s.id, o: s.owner, q: s.seq, x: r2(s.x), y: r2(s.y), z: r2(s.z) }); this.shells.splice(i, 1); continue; }
       if (!dead) {
         const owner = this.players.get(s.owner);
         for (const p of alive) {
@@ -675,7 +748,7 @@ export class Game {
   spawn(p) {
     const w = this.world;
     // team mode: own half of the arena, away from enemies; free-for-all: farthest from everyone
-    const pool = this.teamMode ? TEAM_SPAWNS[p.team] : w.spawns;
+    const pool = this.teamMode ? w.teamSpawns[p.team] : w.spawns;
     let best = pool[p.slot % pool.length], bestD = -Infinity;
     if (this.tutorial) {
       // fixed places: the player in the corner facing the centre, the targets facing the player
@@ -742,7 +815,8 @@ export class Game {
     const MN = this.mines.map((m) => [m.id, m.owner, r2(m.x), r2(m.y), r2(m.z), this.time >= m.armAt ? 1 : 0]);
     this.io.broadcast('s', { k: this.tick, ph: this.phase, tl: Number.isFinite(this.phaseEnds) ? Math.max(0, Math.round(this.phaseEnds - this.time)) : 0, p: P, b: B, e: events,
       hl: this.heal.active ? 1 : 0, hn: this.heal.active ? 0 : Math.max(0, Math.ceil(this.heal.nextAt - this.time)),
-      tk: this.teamMode ? this.teamKills() : undefined, mn: MN.length ? MN : undefined });
+      tk: this.teamMode ? this.teamKills() : undefined, mn: MN.length ? MN : undefined,
+      gm: this.world.gates.length ? gateMask(this.world) : undefined, sw: this.world.switches.length ? Math.max(0, Math.ceil(this.switchReadyAt - this.time)) : undefined });
   }
 
   scoreboard() {
@@ -752,7 +826,7 @@ export class Game {
   }
 
   sendRoster() {
-    this.io.broadcast('roster', { rules: this.rules, players: [...this.players.values()].map((p) => ({
+    this.io.broadcast('roster', { rules: this.rules, stage: this.world.stage, players: [...this.players.values()].map((p) => ({
       id: p.id, name: p.name, slot: this.colorOf(p), team: p.team, connected: p.connected, lv: p.prof?.lv || 0, look: p.prof?.look || null,
       // private rooms label CPU players; quick-match bots look like everyone else
       bot: p.bot && !p.prof?.hidden ? p.bot.level : undefined, lo: p.loadout, ready: p.ready ? 1 : undefined,

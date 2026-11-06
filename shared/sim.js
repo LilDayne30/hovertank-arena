@@ -1,4 +1,5 @@
 import { SIDE, ULT, ULT_MAX, ULT_GAIN, SIDEARMS, ULTS } from './abilities.js';
+import { padLaunch } from './stages.js';
 
 // Shared deterministic-ish simulation used by both server (authoritative) and client (prediction).
 // Units: metres, seconds, radians. Y is up. Yaw 0 faces -Z (PlayCanvas forward).
@@ -151,6 +152,7 @@ export function newTank(x, z, yaw, groundY) {
     shieldT: 0, shieldAge: 9,   // reflect shield time left / time since raised
     odT: 0,              // overdrive time left
     slam: 0,             // 0 none, 1 rising, 2 diving
+    pad: null,           // jump pad flight: horizontal speed waiting to be applied (shared/stages.js padLaunch)
   };
 }
 
@@ -300,13 +302,29 @@ export function stepTank(t, inp, w, dt = DT) {
     if (t.slam === 1 && t.vy <= 0) t.slam = 2;
     t.vy -= C.gravity * (t.slam === 2 ? ULT.slam.fallG : 1) * dt;
     t.y += t.vy * dt;
+    if (t.pad && t.y - C.hoverHeight >= t.pad.clearY) { t.vx = t.pad.vx; t.vz = t.pad.vz; t.pad = null; }   // jump pad: now fly across
     if (t.y <= ground) {
-      t.y = ground; t.vy = 0; t.grounded = true; ev.landed = true;
+      t.y = ground; t.vy = 0; t.grounded = true; ev.landed = true; t.pad = null;
       if (t.slam) { t.slam = 0; ev.slam = true; }
     }
   } else if (t.slam && !ev.jumped) t.slam = 0;
   // safety: never sink below the floor
   if (t.y < (w.floor ?? -10) - 5) { t.y = ground; t.vy = 0; }
+
+  // stage zones (shared/stages.js): jump pads launch you, conveyor belts carry you while grounded
+  if (t.grounded && w.zones?.length) {
+    for (const zn of w.zones) {
+      if (zn.type === 'pad') {
+        if ((t.x - zn.x) ** 2 + (t.z - zn.z) ** 2 > zn.r * zn.r) continue;
+        const L = zn._L || (zn._L = padLaunch(zn, (x, z) => heightAt(w, x, z)));
+        t.vx = 0; t.vz = 0; t.vy = L.vy; t.grounded = false; t.pad = L; ev.pad = true; ev.jumped = true;
+        break;
+      }
+      if (zn.type === 'belt' && t.x >= zn.x0 && t.x <= zn.x1 && t.z >= zn.z0 && t.z <= zn.z1) {
+        tryMove(t, w, t.y - C.hoverHeight, zn.vx * dt, 0); tryMove(t, w, t.y - C.hoverHeight, 0, zn.vz * dt);
+      }
+    }
+  }
 
   // firing
   t.cooldown = Math.max(0, t.cooldown - dt);
